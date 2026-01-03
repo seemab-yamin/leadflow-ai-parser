@@ -15,14 +15,19 @@ Designed to be reused as a base for APIs and ML services.
 
 ## Getting Started
 
-Create environment file:
-```bash
+1. Clone the repository
+```
+git clone https://github.com/seemab-yamin/fastapi-boilerplate
+cd fastapi-docker-boilerplate
+```
+
+2. Create environment file
+```
 cp .env.example .env
 ```
 
-Build and start the service:
-docker-compose up --build
-docker-compose down
+Edit .env if needed.
+
 
 API endpoints:
 
@@ -39,11 +44,13 @@ Run tests:
 docker-compose run api pytest
 ```
 
+Build and start the service:
 
-Stop services:
-```
-docker-compose down
-```
+```docker-compose up --build```
+
+Stop the service
+
+```docker-compose down```
 
 
 Rebuild image only:
