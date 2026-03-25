@@ -59,11 +59,13 @@ def _parse_pdf(
     *,
     picker_root_folder_name: str,
     source_root: str | None = None,
+    pdf_category_by_path: dict[str, str] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """
     Parse each PDF path and return (successful_rows, failed_paths).
 
-    Dispatches to category-specific parser parsers (see ``app.services.parsers``).
+    Dispatches using ``pdf_category_by_path`` when provided (staged ``selection`` flow);
+    otherwise derives category from path + ``picker_root_folder_name`` (cwd batch).
     """
     from app.services.parsers import get_parser_for_category
     from app.services.pdf_category import immediate_subfolder_category
@@ -72,13 +74,21 @@ def _parse_pdf(
     failed_paths: list[dict] = []
     for pdf_path in pdf_paths:
         try:
-            category = immediate_subfolder_category(pdf_path, picker_root_folder_name)
+            if pdf_category_by_path is not None and pdf_path in pdf_category_by_path:
+                category = pdf_category_by_path[pdf_path]
+            else:
+                category = immediate_subfolder_category(
+                    pdf_path, picker_root_folder_name
+                )
             parser_fn = get_parser_for_category(category)
             if parser_fn is None:
                 failed_paths.append(
                     {
                         "pdf_path": pdf_path,
-                        "error": f"No parser registered for category {category!r}.",
+                        "error": (
+                            f"No parser is implemented for document category {category!r}. "
+                            "Add a parser mapping for this category or choose a supported folder."
+                        ),
                     }
                 )
                 continue
@@ -132,9 +142,14 @@ def run_pdf_batch(
     root_folder: str,
     pdf_paths: list[str] | None = None,
     source_root: str | None = None,
+    pdf_category_by_path: dict[str, str] | None = None,
 ) -> tuple[str, list[dict], int]:
     """
     Process the PDF batch and write **one** Excel output file.
+
+    ``pdf_category_by_path`` maps each staging-relative (or cwd-relative) ``pdf_paths``
+    entry to the **document category** label used for parser lookup (from client
+    ``selection`` when staged).
 
     Returns
     -------
@@ -147,7 +162,10 @@ def run_pdf_batch(
     out_path = _build_output_path(root_folder)
 
     parser_rows, failed_paths = _parse_pdf(
-        paths, picker_root_folder_name=root_folder, source_root=source_root
+        paths,
+        picker_root_folder_name=root_folder,
+        source_root=source_root,
+        pdf_category_by_path=pdf_category_by_path,
     )
     _write_excel_output(
         out_path=out_path,

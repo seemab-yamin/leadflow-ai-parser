@@ -1,6 +1,8 @@
 # LeadfFlow AI Parser — Project Blueprint
 
-**Purpose:** Local-first web app: user picks a folder of PDFs in the browser, the backend stages files, runs **DC** category extraction (Tika → preprocess → optional OpenAI JSON), and exports an **Excel** workbook with successful rows and per-file failures.
+**Purpose:** Local-first web app: user picks a folder of PDFs in the browser, the backend stages files, runs category-specific extraction (today: **DC** parser pipeline — Tika → preprocess → optional OpenAI JSON), and exports an **Excel** workbook with successful rows and per-file failures.
+
+**Workflow direction:** **Category folders** are whatever appears as an immediate child of the pick root (e.g. `DC`, `VA Alexandria`). Under each, **bucket** subfolders (immediate children) are listed; the user **selects which buckets** to process. The browser sends **`selection`** on `POST /api/process-batch`; the server expands it to staged PDF paths and attaches the **client category label** per file for parser dispatch (no path-only re-inference for that flow). See `app/core/batch_selection_contract.py` and `todo.md`.
 
 **Audience:** Developers aligning implementation with architecture; pair with `README.md` for day-to-day run instructions.
 
@@ -10,7 +12,7 @@
 
 1. Serve a Jinja **home page** (`/`) with Tailwind + static JS for folder selection, local path summary, batch progress, and download.
 2. **Optional staging** via `app/services/upload_jobs.py` if you add a multipart upload route later (`outputs/uploads/<job_id>/`).
-3. **Process** supported PDF paths (today: immediate subfolder **`DC`** per `app/core/supported_pdf_categories.py`) via `run_pdf_batch` and **`POST /api/process-batch`** (`pdf_paths` + `root_folder`).
+3. **Process** PDFs via `run_pdf_batch` and **`POST /api/process-batch`**: primary shape is `root_folder` + `upload_job_id` + **`selection`** (per-category bucket list). **Legacy:** `pdf_paths` with `upload_job_id` (no `selection`) or cwd-only `pdf_paths` — category comes from staged-path rules or `immediate_subfolder_category` respectively. **Parser implementation keys** (e.g. `dc`) live in `app/core/supported_pdf_categories.py`.
 4. **Extract text** with **Apache Tika** (Java on `PATH`) and run **LLM JSON extraction** using prompts under `prompts/` and `config.json` (`llm_model`, `dc_prompt_version`, optional `dc_min_preprocessed_chars`).
 5. **Return** a single `.xlsx` (`outputs/batch/`) and expose **async job status** with **`failed_paths`**, **`pdf_paths_attempted`**, **`pdf_paths_failed`** for transparent UI messaging before download.
 
@@ -28,11 +30,14 @@ Develop and run on **macOS, Windows, and Linux**: Python 3.12+, venv, `uvicorn`.
 
 ## Core User Flow (browser)
 
+**Target (see `todo.md`):**
+
 1. User opens `/` (FastAPI + Jinja).
-2. User chooses a folder (`webkitdirectory`); the SPA builds **`pdf_paths`** and a category summary **in the browser** (aligned with `app/services/pdf_category.py` rules).
-3. User runs **`POST /api/process-batch`** with `root_folder` and **`pdf_paths`** → **202** + `job_id`. Paths must **exist on the API host** (relative to server cwd or absolute).
-4. UI polls **`GET /api/process-batch/status/{job_id}`** until `completed` or `failed`.
-5. On success, UI may **HEAD** verify then **`GET /api/download/batch-output/{filename}`** for the workbook.
+2. User chooses a folder (`webkitdirectory`); eligible PDFs upload to **`POST /api/upload-folder`** → `upload_job_id`.
+3. UI lists **category folders** (immediate children of the pick root) and, under each, **bucket** subfolders (immediate children). User selects which buckets to include.
+4. User runs **`POST /api/process-batch`** with `root_folder`, `upload_job_id`, and **`selection`**: `[{ "category", "subfolders" }, …]` (`subfolders` may include `""` for PDFs directly in the category folder) → **202** + `job_id` if at least one path maps to an implemented parser; otherwise **400** with a per-category message. Legacy: `pdf_paths` + `upload_job_id` without `selection` still works for scripts/tests.
+5. UI polls **`GET /api/process-batch/status/{job_id}`** until `completed` or `failed`.
+6. On success, UI may **HEAD** verify then **`GET /api/download/batch-output/{filename}`** for the workbook.
 
 **Partial failure:** `status` is still `completed` if the job finished but some PDFs failed; those appear in **`failed_paths`** and in the **FailedPaths** sheet. The UI surfaces errors **before** encouraging download.
 
@@ -77,6 +82,7 @@ app/
   core/
     config.py
     logging_setup.py
+    batch_selection_contract.py
     supported_pdf_categories.py
     user_friendly_errors.py
   services/
@@ -124,7 +130,7 @@ requirements.txt
 - `failed_paths`: `[{ "pdf_path", "error" }, ...]` (same as FailedPaths sheet)
 - `pdf_paths_attempted`, `pdf_paths_failed` for UI copy
 
-**`POST /api/process-batch` body** (`ProcessBatchRequest`): `root_folder`, optional `pdf_paths`.
+**`POST /api/process-batch` body** (`ProcessBatchRequest`): `root_folder`, optional `upload_job_id`, optional **`selection`** (`CategoryBucketSelection[]`), optional legacy `pdf_paths`.
 
 ---
 
@@ -141,7 +147,7 @@ requirements.txt
 1. Create venv; install `requirements.txt`.
 2. Java on `PATH` for Tika; set **`OPENAI_API_KEY`** / `config.json` for DC LLM.
 3. `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
-4. Open `http://localhost:8000/` — pick a folder (paths must exist on the server cwd) → process → download.
+4. Open `http://localhost:8000/` — pick a folder → upload → choose category buckets → process → download.
 
 Optional: `python scripts/test_tika_pdf.py path/to/file.pdf`
 
@@ -157,4 +163,4 @@ Optional: `python scripts/test_tika_pdf.py path/to/file.pdf`
 
 ---
 
-*Last revised to match the repository layout and batch/DC pipeline (async job, Excel export, transparent failures).*
+*Last revised: `selection`-first process-batch, explicit per-path category from expansion; legacy `pdf_paths` documented.*

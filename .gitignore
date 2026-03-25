@@ -3,3 +3,5 @@ __pycache__
 outputs/
 todo.md
 *.log
+.venv
+output

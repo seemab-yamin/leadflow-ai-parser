@@ -1,3 +1,7 @@
+/**
+ * Folder discovery (categories / buckets) and parser-available badges are client-side UX only.
+ * `POST /api/process-batch` must send `selection`; the server maps each file’s category from that payload.
+ */
 document.addEventListener("DOMContentLoaded", () => {
   const picker = document.getElementById("directory-picker");
   const pickBtn = document.getElementById("pick-folder-btn");
@@ -23,10 +27,9 @@ document.addEventListener("DOMContentLoaded", () => {
   const selectionViewEl = document.getElementById("selection-view");
   const actionsRowEl = document.getElementById("actions-row");
   const previewSectionEl = document.getElementById("preview-section");
-  const categoryPanelEl = document.getElementById("category-panel");
-  const categoryBreakdownEl = document.getElementById("category-breakdown");
-  const categoriesUnsupportedNoteEl = document.getElementById(
-    "categories-unsupported-note"
+  const bucketSelectionPanelEl = document.getElementById("bucket-selection-panel");
+  const bucketSelectionCategoriesEl = document.getElementById(
+    "bucket-selection-categories"
   );
 
   /**
@@ -40,8 +43,10 @@ document.addEventListener("DOMContentLoaded", () => {
    */
   let lastBatch = null;
 
-  /** Mirrors ``SUPPORTED_BATCH_FOLDER_CATEGORIES`` (``app/core/supported_pdf_categories.py``). */
-  const SUPPORTED_FOLDER_CATEGORIES = new Set(["dc"]);
+  /**
+   * UX-only hint for badges; server truth is `resolve_parser_key_for_user_category_folder`.
+   */
+  const PARSER_AVAILABLE_CATEGORY_FOLDERS = new Set(["dc"]);
 
   function stripPickerRootPrefix(parts, rootFolderName) {
     if (!parts.length || !rootFolderName || !String(rootFolderName).trim()) {
@@ -62,48 +67,326 @@ document.addEventListener("DOMContentLoaded", () => {
     return parts[0];
   }
 
-  function isParserSupportedCategory(categoryName) {
-    return SUPPORTED_FOLDER_CATEGORIES.has(
+  function categoryFolderHasParser(categoryName) {
+    return PARSER_AVAILABLE_CATEGORY_FOLDERS.has(
       String(categoryName || "").trim().toLowerCase()
     );
   }
 
-  function sortCategoriesForDisplay(names) {
+  function sortCategoryNamesForDisplay(names) {
     const ROOT = "(root)";
     return [...names].sort((a, b) => {
-      const asup = isParserSupportedCategory(a);
-      const bsup = isParserSupportedCategory(b);
       const aroot = a === ROOT;
       const broot = b === ROOT;
-      if (asup !== bsup) return asup ? -1 : 1;
       if (aroot !== broot) return aroot ? 1 : -1;
       return a.localeCompare(b, undefined, { sensitivity: "base" });
     });
   }
 
   /**
-   * Build category counts from picked files (same rules as server ``pdf_category``).
-   * @param {string[]} pdfPaths
+   * @typedef {{ pdfCount: number, parserAvailable: boolean }} BucketScanBucket
+   * @typedef {{ buckets: Map<string, BucketScanBucket>, parserAvailable: boolean }} BucketScanCategory
+   * Scan picked files: category = first segment under root; bucket = next segment (or "" for PDFs directly in category).
+   * @param {File[]} files
    * @param {string} rootFolderName
+   * @returns {Map<string, BucketScanCategory>}
    */
-  function summarizeLocalFolderPdfPaths(pdfPaths, rootFolderName) {
-    const byCat = new Map();
-    for (const p of pdfPaths) {
-      const cat = immediateSubfolderCategory(p, rootFolderName);
-      byCat.set(cat, (byCat.get(cat) || 0) + 1);
+  function scanFolderBucketHierarchy(files, rootFolderName) {
+    const categories = new Map();
+    const root = String(rootFolderName || "").trim();
+
+    for (const f of files) {
+      const rel = f.webkitRelativePath || f.name;
+      let parts = String(rel || "")
+        .replace(/\\/g, "/")
+        .split("/")
+        .filter(Boolean);
+      parts = stripPickerRootPrefix(parts, root);
+      if (parts.length < 1) continue;
+
+      const leaf = parts[parts.length - 1] || "";
+      const isPdf = leaf.toLowerCase().endsWith(".pdf");
+      if (!isPdf) continue;
+
+      if (parts.length === 1) {
+        const cat = "(root)";
+        if (!categories.has(cat)) {
+          categories.set(cat, {
+            buckets: new Map(),
+            parserAvailable: categoryFolderHasParser(cat),
+          });
+        }
+        const bkey = "";
+        const c = categories.get(cat);
+        const prev = c.buckets.get(bkey) || {
+          pdfCount: 0,
+          parserAvailable: c.parserAvailable,
+        };
+        prev.pdfCount += 1;
+        c.buckets.set(bkey, prev);
+        continue;
+      }
+
+      const cat = parts[0];
+      if (!categories.has(cat)) {
+        categories.set(cat, {
+          buckets: new Map(),
+          parserAvailable: categoryFolderHasParser(cat),
+        });
+      }
+      const c = categories.get(cat);
+
+      if (parts.length === 2) {
+        const bkey = "";
+        const prev = c.buckets.get(bkey) || {
+          pdfCount: 0,
+          parserAvailable: c.parserAvailable,
+        };
+        prev.pdfCount += 1;
+        c.buckets.set(bkey, prev);
+      } else {
+        const bkey = parts[1];
+        const prev = c.buckets.get(bkey) || {
+          pdfCount: 0,
+          parserAvailable: c.parserAvailable,
+        };
+        prev.pdfCount += 1;
+        c.buckets.set(bkey, prev);
+      }
     }
-    const categoryNames = sortCategoriesForDisplay(Array.from(byCat.keys()));
-    const pdf_categories = categoryNames.map((category_name) => ({
-      category_name,
-      pdf_count: byCat.get(category_name) || 0,
-      parser_supported: isParserSupportedCategory(category_name),
-    }));
-    const pdf_sample = pdfPaths.slice(0, 10).map((pdf_path) => ({ pdf_path }));
-    return {
-      pdf_total_count: pdfPaths.length,
-      pdf_categories,
-      pdf_sample,
-    };
+
+    return categories;
+  }
+
+  /**
+   * @param {string} pdfPath
+   * @param {string} rootFolderName
+   * @param {Map<string, Set<string>>} selection category -> set of bucket keys ("" allowed)
+   */
+  function pdfPathMatchesBucketSelection(pdfPath, rootFolderName, selection) {
+    let parts = String(pdfPath || "")
+      .replace(/\\/g, "/")
+      .split("/")
+      .filter(Boolean);
+    parts = stripPickerRootPrefix(parts, rootFolderName);
+    if (parts.length < 1) return false;
+    const leaf = parts[parts.length - 1] || "";
+    if (!leaf.toLowerCase().endsWith(".pdf")) return false;
+
+    if (parts.length === 1) {
+      const set = selection.get("(root)");
+      return Boolean(set && set.has(""));
+    }
+
+    const cat = parts[0];
+    const set = selection.get(cat);
+    if (!set) return false;
+    if (parts.length === 2) return set.has("");
+    const bucket = parts[1];
+    return set.has(bucket);
+  }
+
+  /**
+   * Build `selection` for `POST /api/process-batch` from checked bucket boxes.
+   * @returns {{ category: string, subfolders: string[] }[]}
+   */
+  function readSelectionForApi() {
+    const map = readBucketCheckboxSelection();
+    const names = sortCategoryNamesForDisplay(Array.from(map.keys()));
+    const selection = [];
+    for (const cat of names) {
+      const set = map.get(cat);
+      if (!set || set.size === 0) continue;
+      const subfolders = Array.from(set).sort((a, b) => {
+        if (a === "" && b !== "") return -1;
+        if (b === "" && a !== "") return 1;
+        return a.localeCompare(b, undefined, { sensitivity: "base" });
+      });
+      selection.push({ category: cat, subfolders });
+    }
+    return selection;
+  }
+
+  /**
+   * @returns {Map<string, Set<string>>}
+   */
+  function readBucketCheckboxSelection() {
+    const map = new Map();
+    const boxes = bucketSelectionCategoriesEl.querySelectorAll(
+      "input[type=checkbox][data-bucket-key]"
+    );
+    for (const el of boxes) {
+      if (!(el instanceof HTMLInputElement)) continue;
+      if (!el.checked) continue;
+      const cat = el.getAttribute("data-category");
+      if (cat == null) continue;
+      const bucketKey = el.getAttribute("data-bucket-key") ?? "";
+      if (!map.has(cat)) map.set(cat, new Set());
+      map.get(cat).add(bucketKey);
+    }
+    return map;
+  }
+
+  function filterPdfPathsByBucketSelection(pdfPaths, rootFolderName, selection) {
+    return pdfPaths.filter((p) =>
+      pdfPathMatchesBucketSelection(p, rootFolderName, selection)
+    );
+  }
+
+  function countParserAvailableInSelection(pdfPaths, rootFolderName, selection) {
+    let n = 0;
+    for (const p of pdfPaths) {
+      if (!pdfPathMatchesBucketSelection(p, rootFolderName, selection)) continue;
+      const cat = immediateSubfolderCategory(p, rootFolderName);
+      if (categoryFolderHasParser(cat)) n += 1;
+    }
+    return n;
+  }
+
+  function bucketLabel(bucketKey) {
+    if (bucketKey === "") return "PDFs directly in this folder";
+    return bucketKey;
+  }
+
+  /**
+   * Check or uncheck every bucket checkbox for one category (exact `data-category` match).
+   * @param {string} category
+   * @param {boolean} checked
+   */
+  function setAllBucketsInCategoryChecked(category, checked) {
+    const boxes = bucketSelectionCategoriesEl.querySelectorAll(
+      "input[type=checkbox][data-category][data-bucket-key]"
+    );
+    for (const el of boxes) {
+      if (!(el instanceof HTMLInputElement)) continue;
+      if (el.getAttribute("data-category") !== category) continue;
+      el.checked = checked;
+    }
+    syncProcessButton();
+  }
+
+  /**
+   * @param {Map<string, { buckets: Map<string, { pdfCount: number }>, parserAvailable: boolean }>} hierarchy
+   */
+  function renderBucketSelectionPanel(hierarchy) {
+    bucketSelectionCategoriesEl.innerHTML = "";
+    if (!hierarchy.size) {
+      bucketSelectionPanelEl.hidden = true;
+      return;
+    }
+
+    bucketSelectionPanelEl.hidden = false;
+    const names = sortCategoryNamesForDisplay(Array.from(hierarchy.keys()));
+
+    for (const cat of names) {
+      const meta = hierarchy.get(cat);
+      if (!meta) continue;
+      const entries = Array.from(meta.buckets.entries()).sort((a, b) => {
+        const ak = a[0] === "" ? "\u0000" : a[0];
+        const bk = b[0] === "" ? "\u0000" : b[0];
+        return ak.localeCompare(bk, undefined, { sensitivity: "base" });
+      });
+
+      const card = document.createElement("div");
+      card.className =
+        "rounded-xl border border-slate-200 bg-white p-4 shadow-sm";
+
+      const head = document.createElement("div");
+      head.className =
+        "flex flex-wrap items-center justify-between gap-2 gap-y-1";
+
+      const title = document.createElement("div");
+      title.className = "font-semibold text-slate-900";
+      title.textContent = cat === "(root)" ? "Root of selection (no category folder)" : cat;
+
+      const badge = document.createElement("span");
+      if (meta.parserAvailable) {
+        badge.className =
+          "text-xs font-semibold uppercase tracking-wide text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md";
+        badge.textContent = "Parser available";
+      } else {
+        badge.className =
+          "text-xs font-semibold uppercase tracking-wide text-amber-900 bg-amber-100 px-2 py-0.5 rounded-md";
+        badge.textContent = "No parser yet";
+      }
+
+      head.appendChild(title);
+      head.appendChild(badge);
+      card.appendChild(head);
+
+      const toolbar = document.createElement("div");
+      toolbar.className =
+        "mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-slate-100 pt-2";
+      toolbar.setAttribute("role", "group");
+      toolbar.setAttribute(
+        "aria-label",
+        cat === "(root)"
+          ? "Bulk selection for root-level PDFs"
+          : `Bulk selection for category ${cat}`
+      );
+
+      const mkBulkBtn = (label, bulk, titleText) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = label;
+        b.setAttribute("data-bucket-bulk", bulk);
+        b.setAttribute("data-category", cat);
+        b.title = titleText;
+        b.className =
+          "text-xs font-semibold text-indigo-600 hover:text-indigo-800 " +
+          "underline-offset-2 hover:underline focus-visible:outline " +
+          "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-400 " +
+          "rounded px-0.5 py-0.5";
+        return b;
+      };
+
+      toolbar.appendChild(
+        mkBulkBtn(
+          "Select all",
+          "all-on",
+          `Check every bucket under “${cat === "(root)" ? "root" : cat}”.`
+        )
+      );
+      toolbar.appendChild(
+        mkBulkBtn(
+          "Deselect all",
+          "all-off",
+          `Uncheck every bucket under “${cat === "(root)" ? "root" : cat}”.`
+        )
+      );
+      card.appendChild(toolbar);
+
+      const ul = document.createElement("ul");
+      ul.className = "mt-3 space-y-2 text-sm";
+
+      for (const [bkey, bmeta] of entries) {
+        const li = document.createElement("li");
+        li.className = "list-none";
+
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.className =
+          "mt-0.5 shrink-0 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500";
+        cb.checked = true;
+        cb.setAttribute("data-category", cat);
+        cb.setAttribute("data-bucket-key", bkey);
+
+        const lab = document.createElement("label");
+        lab.className =
+          "flex items-start gap-2 text-slate-700 cursor-pointer select-none flex-1";
+        lab.appendChild(cb);
+        const span = document.createElement("span");
+        span.className = "pt-0.5";
+        span.textContent = `${bucketLabel(bkey)} — ${bmeta.pdfCount} PDF${bmeta.pdfCount === 1 ? "" : "s"}`;
+        lab.appendChild(span);
+
+        li.appendChild(lab);
+        ul.appendChild(li);
+      }
+
+      card.appendChild(ul);
+      bucketSelectionCategoriesEl.appendChild(card);
+    }
   }
 
   /**
@@ -140,87 +423,27 @@ document.addEventListener("DOMContentLoaded", () => {
     !selectionViewEl ||
     !actionsRowEl ||
     !previewSectionEl ||
-    !categoryPanelEl ||
-    !categoryBreakdownEl ||
-    !categoriesUnsupportedNoteEl
+    !bucketSelectionPanelEl ||
+    !bucketSelectionCategoriesEl
   ) {
     return;
   }
 
-  function formatCategoryDisplayName(name) {
-    if (name === "(root)") return "Root folder (no subfolder)";
-    return name;
-  }
+  bucketSelectionCategoriesEl.addEventListener("change", () => {
+    syncProcessButton();
+  });
 
-  /**
-   * @param {Array<{ category_name?: string; pdf_count?: number; parser_supported?: boolean }>} categories
-   */
-  function renderCategoryBreakdown(categories) {
-    categoryBreakdownEl.innerHTML = "";
-    categoriesUnsupportedNoteEl.hidden = true;
-    categoriesUnsupportedNoteEl.textContent = "";
-
-    if (!categories.length) {
-      categoryPanelEl.hidden = true;
-      return;
-    }
-
-    categoryPanelEl.hidden = false;
-    for (const c of categories) {
-      const name = typeof c.category_name === "string" ? c.category_name : "?";
-      const pdfCount = Number(c.pdf_count ?? 0);
-      const supported = Boolean(c.parser_supported);
-
-      const li = document.createElement("li");
-      li.className =
-        "flex flex-wrap items-center justify-between gap-2 px-4 py-3";
-
-      const left = document.createElement("span");
-      left.className = "font-medium text-slate-800";
-      left.textContent = formatCategoryDisplayName(name);
-
-      const badge = document.createElement("span");
-      if (supported) {
-        badge.className =
-          "text-xs font-semibold uppercase tracking-wide text-green-800 bg-green-100 px-2 py-0.5 rounded-md";
-        badge.textContent = "Supported";
-      } else {
-        badge.className =
-          "text-xs font-semibold uppercase tracking-wide text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md";
-        badge.textContent = "Not available yet";
-      }
-
-      const countEl = document.createElement("span");
-      countEl.className = "text-slate-600 tabular-nums";
-      countEl.textContent = `${pdfCount} PDF${pdfCount === 1 ? "" : "s"}`;
-
-      const right = document.createElement("div");
-      right.className = "flex items-center gap-2";
-      right.appendChild(countEl);
-      right.appendChild(badge);
-
-      li.appendChild(left);
-      li.appendChild(right);
-      categoryBreakdownEl.appendChild(li);
-    }
-
-    const unsupported = categories.filter(
-      (c) => !c.parser_supported && (Number(c.pdf_count) || 0) > 0
-    );
-    if (unsupported.length) {
-      const names = unsupported
-        .map((c) =>
-          formatCategoryDisplayName(
-            typeof c.category_name === "string" ? c.category_name : "?"
-          )
-        )
-        .join(", ");
-      categoriesUnsupportedNoteEl.hidden = false;
-      categoriesUnsupportedNoteEl.textContent =
-        `These categories are listed for your reference only — they are not processed yet: ${names}. ` +
-        `Only PDFs inside a "DC" subfolder are parsed today; support for other folders will be added later.`;
-    }
-  }
+  bucketSelectionCategoriesEl.addEventListener("click", (ev) => {
+    const t = ev.target;
+    if (!(t instanceof Element)) return;
+    const btn = t.closest("button[data-bucket-bulk]");
+    if (!btn || !bucketSelectionCategoriesEl.contains(btn)) return;
+    const bulk = btn.getAttribute("data-bucket-bulk");
+    const category = btn.getAttribute("data-category");
+    if (category == null || (bulk !== "all-on" && bulk !== "all-off")) return;
+    ev.preventDefault();
+    setAllBucketsInCategoryChecked(category, bulk === "all-on");
+  });
 
   function renderLucideIcons() {
     if (window.lucide && typeof window.lucide.createIcons === "function") {
@@ -691,7 +914,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function syncProcessButton() {
     const total = lastBatch?.pdfCount ?? 0;
-    const supported = lastBatch?.supportedPdfCount ?? 0;
     const hasPdfs = Boolean(lastBatch?.folder) && total > 0;
     if (!hasPdfs) {
       processBtn.disabled = true;
@@ -708,10 +930,28 @@ document.addEventListener("DOMContentLoaded", () => {
       processBtn.title = "Upload must finish before processing.";
       return;
     }
+    const root = lastBatch.folder;
+    const sel = readBucketCheckboxSelection();
+    const selectedPaths = filterPdfPathsByBucketSelection(
+      lastBatch.pdfPaths || [],
+      root,
+      sel
+    );
+    const supported = countParserAvailableInSelection(
+      lastBatch.pdfPaths || [],
+      root,
+      sel
+    );
+    if (selectedPaths.length < 1) {
+      processBtn.disabled = true;
+      processBtn.title =
+        "Select at least one bucket that contains PDFs to process.";
+      return;
+    }
     if (supported < 1) {
       processBtn.disabled = true;
       processBtn.title =
-        'Only PDFs under a "DC" subfolder can be processed right now. Add or move PDFs into "DC" to run the batch.';
+        "None of the selected buckets use a parser that is implemented yet (e.g. include a DC bucket).";
       return;
     }
     if (batchAlreadyProcessedForSelection) {
@@ -744,8 +984,7 @@ document.addEventListener("DOMContentLoaded", () => {
     folderNameEl.textContent = "None";
     fileCountEl.textContent = "0";
     renderPreviewFromPaths([], 10);
-    renderCategoryBreakdown([]);
-    categoryPanelEl.hidden = true;
+    renderBucketSelectionPanel(new Map());
     setError("");
     setStatus("");
     hideBatchJobUi();
@@ -791,15 +1030,34 @@ document.addEventListener("DOMContentLoaded", () => {
     if (
       !lastBatch?.folder ||
       !lastBatch?.uploadJobId ||
-      (lastBatch.pdfCount ?? 0) < 1 ||
-      (lastBatch.supportedPdfCount ?? 0) < 1
+      (lastBatch.pdfCount ?? 0) < 1
     ) {
+      return null;
+    }
+    const sel = readBucketCheckboxSelection();
+    const selectedPaths = filterPdfPathsByBucketSelection(
+      lastBatch.pdfPaths || [],
+      lastBatch.folder,
+      sel
+    );
+    const supported = countParserAvailableInSelection(
+      lastBatch.pdfPaths || [],
+      lastBatch.folder,
+      sel
+    );
+    if (selectedPaths.length < 1 || supported < 1) {
+      return null;
+    }
+
+    const selection = readSelectionForApi();
+    if (selection.length < 1) {
       return null;
     }
 
     const body = {
       root_folder: lastBatch.folder,
       upload_job_id: lastBatch.uploadJobId,
+      selection,
     };
 
     let res;
@@ -905,10 +1163,26 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   processBtn.addEventListener("click", async () => {
+    const sel = readBucketCheckboxSelection();
+    const selectedPaths = lastBatch
+      ? filterPdfPathsByBucketSelection(
+          lastBatch.pdfPaths || [],
+          lastBatch.folder,
+          sel
+        )
+      : [];
+    const supported = lastBatch
+      ? countParserAvailableInSelection(
+          lastBatch.pdfPaths || [],
+          lastBatch.folder,
+          sel
+        )
+      : 0;
     if (
       !lastBatch?.folder ||
       (lastBatch.pdfCount ?? 0) < 1 ||
-      (lastBatch.supportedPdfCount ?? 0) < 1
+      selectedPaths.length < 1 ||
+      supported < 1
     ) {
       return;
     }
@@ -1043,22 +1317,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       const pdfPaths = collectPdfPathsFromFileList(files);
-      const data = summarizeLocalFolderPdfPaths(pdfPaths, displayRoot);
-      const pdfCount = Number(data.pdf_total_count ?? 0);
+      const pdfCount = pdfPaths.length;
       fileCountEl.textContent = String(pdfCount);
-      const pdfCategories = data.pdf_categories;
-      const supportedPdfCount = pdfCategories.reduce(
-        (n, c) =>
-          n +
-          (c.parser_supported ? Number(c.pdf_count ?? 0) || 0 : 0),
-        0
-      );
-      renderCategoryBreakdown(pdfCategories);
+      const hierarchy = scanFolderBucketHierarchy(files, displayRoot);
+      renderBucketSelectionPanel(hierarchy);
       if (pdfCount < 1) {
-        categoryPanelEl.hidden = true;
+        renderBucketSelectionPanel(new Map());
       }
-      const samplePaths = (data.pdf_sample || []).map((e) => e.pdf_path);
-      renderPreviewFromPaths(samplePaths, 10);
+      renderPreviewFromPaths(pdfPaths.slice(0, 10), 10);
+      const sel0 = readBucketCheckboxSelection();
+      const supportedPdfCount = countParserAvailableInSelection(
+        pdfPaths,
+        displayRoot,
+        sel0
+      );
       lastBatch = {
         folder: displayRoot,
         pdfCount,
@@ -1083,7 +1355,9 @@ document.addEventListener("DOMContentLoaded", () => {
           "staging_dir:",
           up.staging_dir
         );
-        setStatus("Upload complete — review, then click “Process folder”.");
+        setStatus(
+          "Upload complete — adjust bucket checkboxes if needed, then click “Process folder”."
+        );
       } else {
         setStatus("No PDFs in this folder — pick another folder or add PDFs.");
       }
@@ -1097,8 +1371,7 @@ document.addEventListener("DOMContentLoaded", () => {
       setStatus("");
       fileCountEl.textContent = "0";
       renderPreviewFromPaths([], 10);
-      renderCategoryBreakdown([]);
-      categoryPanelEl.hidden = true;
+      renderBucketSelectionPanel(new Map());
       lastBatch = null;
       isUploadingToServer = false;
       syncProcessButton();

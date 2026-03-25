@@ -1,30 +1,38 @@
 """
 Category-specific PDF → row parsers.
 
-Keys must match :data:`app.core.supported_pdf_categories.SUPPORTED_BATCH_FOLDER_CATEGORIES`.
+Parser dict keys are **implementation keys** (e.g. ``dc``); they must match
+``app.core.supported_pdf_categories.PARSER_IMPLEMENTATION_KEYS``.
+
+User-facing **category folder names** (e.g. ``DC``) map to those keys via
+``app.core.supported_pdf_categories.resolve_parser_key_for_user_category_folder``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 
-from app.core.supported_pdf_categories import SUPPORTED_BATCH_FOLDER_CATEGORIES
+from app.core.supported_pdf_categories import (
+    PARSER_IMPLEMENTATION_KEYS,
+    resolve_parser_key_for_user_category_folder,
+)
 
 from .dc import parse_dc_parser
 
-# Normalized category key → parser (must stay in sync with ``supported_pdf_categories``).
 PARSERS_BY_CATEGORY: dict[str, Callable[..., list[dict]]] = {
     "dc": parse_dc_parser,
 }
 
-if set(PARSERS_BY_CATEGORY.keys()) != set(SUPPORTED_BATCH_FOLDER_CATEGORIES):
+if set(PARSERS_BY_CATEGORY.keys()) != set(PARSER_IMPLEMENTATION_KEYS):
     raise RuntimeError(
         "PARSERS_BY_CATEGORY keys must exactly match "
-        "SUPPORTED_BATCH_FOLDER_CATEGORIES in app.core.supported_pdf_categories"
+        "PARSER_IMPLEMENTATION_KEYS in app.core.supported_pdf_categories"
     )
 
 
-def get_parser_for_category(category_name: str) -> Callable[..., list[dict]] | None:
-    """Return the parser for a folder category, or ``None`` if not implemented."""
-    key = category_name.strip().casefold()
-    return PARSERS_BY_CATEGORY.get(key)
+def get_parser_for_category(category_folder_name: str) -> Callable[..., list[dict]] | None:
+    """Resolve the user’s category folder name to a parser callable, if implemented."""
+    impl_key = resolve_parser_key_for_user_category_folder(category_folder_name)
+    if impl_key is None:
+        return None
+    return PARSERS_BY_CATEGORY.get(impl_key)

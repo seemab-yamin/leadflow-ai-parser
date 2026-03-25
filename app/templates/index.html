@@ -83,14 +83,17 @@
           </div>
         </div>
 
-        <div id="category-panel" class="mt-8" hidden>
-          <div class="text-sm font-semibold text-slate-800 mb-3">
-            PDFs by subfolder (category)
+        <div id="bucket-selection-panel" class="mt-8" hidden>
+          <div class="text-sm font-semibold text-slate-800 mb-1">
+            Document categories &amp; buckets
           </div>
-          <ul id="category-breakdown"
-            class="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100 text-sm"></ul>
-          <p id="categories-unsupported-note"
-            class="mt-3 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-xl p-3" hidden></p>
+          <p class="text-xs text-slate-600 mb-4 leading-relaxed">
+            Top-level folders under your pick are <strong>categories</strong> (e.g. DC, VA Alexandria).
+            Under each, only checked <strong>buckets</strong> (immediate subfolders) are sent when you
+            process. Use <strong>Select all</strong> / <strong>Deselect all</strong> per category to toggle every bucket in that category at once.
+            PDFs sitting directly in a category folder appear as one bucket row.
+          </p>
+          <div id="bucket-selection-categories" class="space-y-4"></div>
         </div>
 
         <div id="batch-job-panel" class="mt-8 rounded-xl border border-indigo-200/80 bg-indigo-50/90 p-5 sm:p-6" hidden>
@@ -174,7 +177,7 @@
   </main>
 
   <script src="https://unpkg.com/lucide@latest"></script>
-  <script src="{{ request.url_for('static', path='js/app.js') }}?v=staged-upload-v3"></script>
+  <script src="{{ request.url_for('static', path='js/app.js') }}?v=bucket-bulk-v1"></script>
 </body>
 
 </html>

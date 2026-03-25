@@ -1,63 +1,105 @@
 """
-Source of truth: which **immediate subfolder** names (batch folder categories) the app
-can process today.
+Source of truth: **parser implementations** available in code (internal keys, e.g. ``dc``).
 
-- Add a normalized key (lowercase) to :data:`SUPPORTED_BATCH_FOLDER_CATEGORIES`.
-- Add a matching display label in :data:`DISPLAY_NAME_BY_NORMALIZED_KEY` for user-facing copy.
-- Register a parser for that key in ``app.services.parsers.PARSERS_BY_CATEGORY``.
+Document **categories** (folder names like ``DC``, ``VA Alexandria``) are defined only
+by the user’s directory layout and by what they select in the UI — not by a fixed
+frozenset of “allowed folder names” for inference.
 
-Anything not listed here can appear in the UI folder summary but is not processed by process-batch.
+- Parser keys live in ``PARSER_IMPLEMENTATION_KEYS``.
+- Register callables in ``app.services.parsers.PARSERS_BY_CATEGORY`` (same keys).
+- Map a **user category folder name** → parser key via
+  ``resolve_parser_key_for_user_category_folder`` (convention / config until expanded).
+
+See ``app.core.batch_selection_contract`` for the end-to-end selection workflow.
 """
 
 from __future__ import annotations
 
-# Keys are compared with :func:`str.casefold` on the folder segment (e.g. ``DC`` → ``dc``).
-SUPPORTED_BATCH_FOLDER_CATEGORIES: frozenset[str] = frozenset(
+# Keys used in ``PARSERS_BY_CATEGORY`` (lowercase, stable).
+PARSER_IMPLEMENTATION_KEYS: frozenset[str] = frozenset(
     {
         "dc",
     }
 )
 
-# Stable display strings for errors, logs, and UI copy (key → label).
-DISPLAY_NAME_BY_NORMALIZED_KEY: dict[str, str] = {
+# Human-readable labels for parser keys (errors, logs, docs).
+DISPLAY_NAME_BY_PARSER_KEY: dict[str, str] = {
     "dc": "DC",
 }
 
-if set(DISPLAY_NAME_BY_NORMALIZED_KEY.keys()) != set(SUPPORTED_BATCH_FOLDER_CATEGORIES):
+if set(DISPLAY_NAME_BY_PARSER_KEY.keys()) != set(PARSER_IMPLEMENTATION_KEYS):
     raise RuntimeError(
-        "DISPLAY_NAME_BY_NORMALIZED_KEY keys must exactly match SUPPORTED_BATCH_FOLDER_CATEGORIES"
+        "DISPLAY_NAME_BY_PARSER_KEY keys must exactly match PARSER_IMPLEMENTATION_KEYS"
     )
+
+# Backward compatibility: old name referred to the same set of parser keys.
+SUPPORTED_BATCH_FOLDER_CATEGORIES: frozenset[str] = PARSER_IMPLEMENTATION_KEYS
+DISPLAY_NAME_BY_NORMALIZED_KEY: dict[str, str] = DISPLAY_NAME_BY_PARSER_KEY
+
+
+def resolve_parser_key_for_user_category_folder(
+    category_folder_name: str,
+) -> str | None:
+    """
+    Map the **user’s category folder label** (from ``selection`` or legacy path layout)
+    to a parser implementation key.
+
+    Conventions today: ``DC`` / ``dc`` → ``dc``. Add entries here (and in
+    ``PARSERS_BY_CATEGORY``) when new jurisdiction parsers ship, e.g. a dedicated
+    ``va_alexandria`` key once implemented.
+    """
+    key = category_folder_name.strip().casefold()
+    if key == "dc":
+        return "dc"
+    return None
 
 
 def is_supported_batch_folder_category(category_name: str) -> bool:
-    """Whether this folder category is implemented for batch processing."""
-    return category_name.strip().casefold() in SUPPORTED_BATCH_FOLDER_CATEGORIES
+    """Whether this category folder name maps to an implemented parser."""
+    return resolve_parser_key_for_user_category_folder(category_name) is not None
 
 
 def supported_category_display_names() -> tuple[str, ...]:
-    """Sorted display names, e.g. ``(\"DC\",)`` — use in messages and docs."""
-    keys = sorted(SUPPORTED_BATCH_FOLDER_CATEGORIES)
-    return tuple(DISPLAY_NAME_BY_NORMALIZED_KEY[k] for k in keys)
+    """Sorted labels for parsers that exist in code (e.g. ``(\"DC\",)``)."""
+    keys = sorted(PARSER_IMPLEMENTATION_KEYS)
+    return tuple(DISPLAY_NAME_BY_PARSER_KEY[k] for k in keys)
 
 
 def describe_supported_categories_for_user() -> str:
-    """
-    Short sentence listing supported folder categories (for HTTP errors / logs).
-
-    Example: ``Only the "DC" folder category is supported right now``
-    """
+    """Short sentence listing implemented parsers (not folder names)."""
     labels = supported_category_display_names()
     if not labels:
-        return "No folder categories are configured for processing yet."
+        return "No parsers are implemented for batch processing yet."
     if len(labels) == 1:
-        return f'Only the "{labels[0]}" folder category is supported right now'
+        return f'Only the "{labels[0]}" parser pipeline is implemented right now'
     joined = ", ".join(f'"{label}"' for label in labels)
-    return f"Only these folder categories are supported right now: {joined}"
+    return f"Only these parser pipelines are implemented right now: {joined}"
+
+
+def batch_no_implemented_parser_message(categories_in_batch: list[str]) -> str:
+    """
+    HTTP 400 body when every path in the batch resolves to a category with no parser.
+
+    ``categories_in_batch`` should list distinct user-facing category names (e.g. ``VA Alexandria``).
+    """
+    impl = supported_category_display_names()
+    impl_txt = ", ".join(f'"{x}"' for x in impl) if impl else "(none yet)"
+    uniq = sorted({c.strip() for c in categories_in_batch if c and str(c).strip()})
+    if not uniq:
+        missing_txt = "(could not determine categories)"
+    else:
+        missing_txt = ", ".join(f'"{x}"' for x in uniq)
+    return (
+        "None of the PDFs in this batch use a parser that is implemented yet. "
+        f"Categories in this batch without a parser: {missing_txt}. "
+        f"Implemented today: {impl_txt}."
+    )
 
 
 def process_batch_unsupported_categories_message() -> str:
-    """Full user-facing detail when the batch has PDFs but none in a supported category."""
+    """Generic message when batch categories cannot be matched to parsers (no path list)."""
     return (
         describe_supported_categories_for_user()
-        + " — other folders are shown for your reference but are not processed yet."
+        + " Adjust your folder selection so at least one PDF is under a category "
+        "that has a parser, or add a parser mapping for your category names."
     )
