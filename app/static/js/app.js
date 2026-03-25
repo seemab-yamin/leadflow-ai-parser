@@ -35,6 +35,7 @@ document.addEventListener("DOMContentLoaded", () => {
    *   pdfCount: number;
    *   supportedPdfCount: number;
    *   pdfPaths: string[];
+   *   uploadJobId: string | null;
    * } | null}
    */
   let lastBatch = null;
@@ -111,6 +112,7 @@ document.addEventListener("DOMContentLoaded", () => {
    */
   let batchAlreadyProcessedForSelection = false;
   let isProcessingBatch = false;
+  let isUploadingToServer = false;
   let ignoreNextPickerChange = false;
 
   if (
@@ -242,6 +244,47 @@ document.addEventListener("DOMContentLoaded", () => {
       if (base.endsWith(".pdf")) out.push(p);
     }
     return out;
+  }
+
+  async function uploadFolderToBackend(files, rootFolderName) {
+    const form = new FormData();
+    form.append("root_folder_name", rootFolderName);
+
+    for (const f of files) {
+      const rel = f.webkitRelativePath || f.name;
+      const base = String(rel || "").toLowerCase().split("/").pop() || "";
+      if (!base.endsWith(".pdf")) continue;
+
+      // Use the browser relative path as the multipart filename so the server
+      // can reconstruct the folder layout.
+      form.append("files", f, rel);
+    }
+
+    const res = await fetch("/api/upload-folder", {
+      method: "POST",
+      body: form,
+    });
+
+    let data = null;
+    try {
+      data = await res.json();
+    } catch {
+      data = null;
+    }
+
+    if (!res.ok) {
+      throw new Error(errorMessageFromFetchResponse(res, data));
+    }
+    if (
+      !data ||
+      typeof data !== "object" ||
+      typeof data.upload_job_id !== "string"
+    ) {
+      throw new Error(
+        "Upload succeeded but server did not return an upload job id. Try again."
+      );
+    }
+    return data;
   }
 
   /**
@@ -655,6 +698,16 @@ document.addEventListener("DOMContentLoaded", () => {
       processBtn.removeAttribute("title");
       return;
     }
+    if (isUploadingToServer) {
+      processBtn.disabled = true;
+      processBtn.title = "Uploading PDFs to the server…";
+      return;
+    }
+    if (!lastBatch?.uploadJobId) {
+      processBtn.disabled = true;
+      processBtn.title = "Upload must finish before processing.";
+      return;
+    }
     if (supported < 1) {
       processBtn.disabled = true;
       processBtn.title =
@@ -700,6 +753,7 @@ document.addEventListener("DOMContentLoaded", () => {
     updateUIState("idle");
     lastBatch = null;
     batchAlreadyProcessedForSelection = false;
+    isUploadingToServer = false;
     syncProcessButton();
     syncResetButton();
     pickBtn.disabled = false;
@@ -736,6 +790,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function startBatchJob() {
     if (
       !lastBatch?.folder ||
+      !lastBatch?.uploadJobId ||
       (lastBatch.pdfCount ?? 0) < 1 ||
       (lastBatch.supportedPdfCount ?? 0) < 1
     ) {
@@ -744,8 +799,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const body = {
       root_folder: lastBatch.folder,
-      pdf_paths:
-        lastBatch.pdfPaths.length > 0 ? lastBatch.pdfPaths : null,
+      upload_job_id: lastBatch.uploadJobId,
     };
 
     let res;
@@ -1010,14 +1064,26 @@ document.addEventListener("DOMContentLoaded", () => {
         pdfCount,
         supportedPdfCount,
         pdfPaths,
+        uploadJobId: null,
       };
       console.info(
         "[LeadfFlow] Picked folder:",
         displayRoot,
-        "— PDF paths are sent to the API; files must exist at those paths on the server (or under its working directory)."
+        "— uploading PDFs to the server for staged processing."
       );
       if (pdfCount > 0) {
-        setStatus("Summary ready — review, then click “Process folder”.");
+        isUploadingToServer = true;
+        setStatus(`Uploading ${pdfCount} PDFs to the server…`);
+        const up = await uploadFolderToBackend(files, displayRoot);
+        lastBatch.uploadJobId = up.upload_job_id;
+        isUploadingToServer = false;
+        console.info(
+          "[LeadfFlow] Upload complete:",
+          up.upload_job_id,
+          "staging_dir:",
+          up.staging_dir
+        );
+        setStatus("Upload complete — review, then click “Process folder”.");
       } else {
         setStatus("No PDFs in this folder — pick another folder or add PDFs.");
       }
@@ -1034,11 +1100,13 @@ document.addEventListener("DOMContentLoaded", () => {
       renderCategoryBreakdown([]);
       categoryPanelEl.hidden = true;
       lastBatch = null;
+      isUploadingToServer = false;
       syncProcessButton();
       syncResetButton();
       updateUIState("selection");
     } finally {
       pickBtn.disabled = false;
+      isUploadingToServer = false;
     }
   });
 });

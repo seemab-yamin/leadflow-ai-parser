@@ -47,7 +47,7 @@
           Choose folder
         </h2>
         <p class="mt-2 text-slate-600 text-sm sm:text-base leading-relaxed">
-          Use your browser’s folder picker. We’ll summarize PDF paths here; the server must be able to open those same paths when you run the batch.
+          Use your browser’s folder picker. We’ll upload the eligible PDFs to the server, then run the batch from the server’s staged copies.
         </p>
       </div>
 
@@ -174,7 +174,7 @@
   </main>
 
   <script src="https://unpkg.com/lucide@latest"></script>
-  <script src="{{ request.url_for('static', path='js/app.js') }}"></script>
+  <script src="{{ request.url_for('static', path='js/app.js') }}?v=staged-upload-v3"></script>
 </body>
 
 </html>

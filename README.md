@@ -19,12 +19,20 @@
 
 - **Python 3.12+** (see `requirements.txt`).
 - **Java (JRE/JDK)** on the server if you run DC PDF text extraction: Apache Tika is used via the `tika` package and shells out to Java. Ensure `java` is on `PATH`.
-- **Batch PDFs on disk:** `POST /api/process-batch` accepts `root_folder` plus `pdf_paths` for PDFs that **exist on the API server** (relative paths are resolved from the server process working directory, or use absolute paths).
+  - **Windows (download JDK):** download an OpenJDK build from **Adoptium (Temurin) JDK 17 (LTS)**:
+    - Go to https://adoptium.net/temurin/releases/
+    - Choose: `17` (LTS), `JDK`, `Windows`, and `x64`
+    - Download the `.msi` installer and install it
+    - After installation, verify in a new terminal: `java -version`
+    - If `java` is not found, add Java to `PATH`:
+      - Find your install folder (commonly something like `C:\Program Files\Eclipse Adoptium\jdk-17.*\`)
+      - Add `<JAVA_HOME>\bin` (or the `bin` directory) to `PATH`
 
 ## Folder Selection Flow
 - **Browser:** the UI uses a folder picker (`webkitdirectory`). It builds a PDF path list and category summary **in the browser** (same rules as the server for supported folders such as `DC`).
-- **Process:** `POST /api/process-batch` sends those `pdf_paths` and `root_folder`. The server must be able to open each path (e.g. run the app with its cwd set to a folder tree that mirrors the picked layout, or use absolute server paths).
-- **Staged uploads:** helpers under `outputs/uploads/` (`app/services/upload_jobs.py`) exist for a future multipart upload route if you add one to `main.py`.
+- **Upload to server:** the UI uploads eligible PDFs via `POST /api/upload-folder` and receives an `upload_job_id`.
+- **Process:** `POST /api/process-batch` sends `root_folder` + `upload_job_id` (preferred) and the server processes the staged PDFs under `outputs/uploads/<upload_job_id>/`.
+- **Optional:** `process-batch` can still accept explicit `pdf_paths`, but they must exist on the API host.
 
 ## Prompt Versions
 - Versioned prompts are stored flat under `prompts/`.

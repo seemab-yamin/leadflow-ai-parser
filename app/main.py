@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 from app.api.download_batch import router as download_batch_router
 from app.api.health import router as health_router
 from app.api.process_batch import router as process_batch_router
+from app.api.upload_folder import router as upload_folder_router
 from app.core.config import settings
 from app.core.logging_setup import configure_logging, http_request_logging_middleware
 
@@ -17,6 +18,7 @@ app = FastAPI(title="LeadfFlow AI Parser")
 app.include_router(health_router, prefix="/health")
 app.include_router(process_batch_router, prefix="/api")
 app.include_router(download_batch_router, prefix="/api")
+app.include_router(upload_folder_router, prefix="/api")
 
 templates = Jinja2Templates(
     directory=str(Path(__file__).resolve().parent / "templates")

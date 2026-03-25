@@ -24,6 +24,7 @@ from app.services.batch_jobs import (
 )
 from app.services.pdf_batch_processor import run_pdf_batch
 from app.services.pdf_category import filter_supported_pdf_paths
+from app.services.upload_jobs import get_upload_job_dir, list_pdf_paths
 
 router = APIRouter()
 
@@ -33,6 +34,7 @@ def _execute_batch_job(
     root_folder: str,
     pdf_paths: list[str] | None,
     source_root: str | None = None,
+    upload_job_id: str | None = None,
 ) -> None:
     """Runs in a thread pool (sync def via FastAPI BackgroundTasks)."""
     logger = get_logger()
@@ -61,6 +63,9 @@ def _execute_batch_job(
         pdf_paths_attempted=pdf_paths_attempted,
     )
 
+    # Intentionally do not delete `outputs/uploads/<upload_job_id>/` here.
+    # Keeping staged files makes it easier to debug missing-path issues.
+
 
 @router.post("/process-batch")
 async def start_process_batch(
@@ -73,7 +78,26 @@ async def start_process_batch(
     Poll ``GET /api/process-batch/status/{job_id}`` until ``status`` is ``completed`` or ``failed``.
     """
     logger = get_logger()
-    raw_paths = list(payload.pdf_paths or [])
+    if payload.upload_job_id:
+        staged_dir = get_upload_job_dir(payload.upload_job_id)
+        if staged_dir is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "The upload job id is invalid or has expired. Please upload the folder again."
+                ),
+            )
+        source_root = str(staged_dir)
+        raw_paths = list_pdf_paths(staged_dir)
+        logger.info(
+            "process-batch using staged upload upload_job_id=%s pdf_paths=%s root_folder=%r",
+            payload.upload_job_id,
+            len(raw_paths),
+            payload.root_folder,
+        )
+    else:
+        source_root = None
+        raw_paths = list(payload.pdf_paths or [])
 
     supported_paths = filter_supported_pdf_paths(raw_paths, payload.root_folder)
     if raw_paths and not supported_paths:
@@ -103,7 +127,8 @@ async def start_process_batch(
         job.job_id,
         payload.root_folder,
         paths_to_run or None,
-        None,
+        source_root,
+        payload.upload_job_id,
     )
 
     logger.info(

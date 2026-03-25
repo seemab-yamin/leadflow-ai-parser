@@ -9,3 +9,4 @@ pandas
 tika
 python-multipart
 openai
+auto-py-to-exe

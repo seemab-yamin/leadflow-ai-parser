@@ -16,6 +16,13 @@ class ProcessBatchRequest(BaseModel):
             "`pdf_path` to determine category (e.g. immediate subfolder like `DC`)."
         ),
     )
+    upload_job_id: str | None = Field(
+        None,
+        description=(
+            "If provided, the API will process PDFs staged under "
+            "`outputs/uploads/<upload_job_id>/` (uploaded by `POST /api/upload-folder`)."
+        ),
+    )
     pdf_paths: list[str] | None = Field(
         None,
         description=(
@@ -41,6 +48,17 @@ class ProcessBatchRequest(BaseModel):
             if ".." in parts:
                 raise ValueError("Paths must not contain '..'.")
         return v
+
+    @field_validator("upload_job_id")
+    @classmethod
+    def _validate_upload_job_id(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError("upload_job_id must be a non-empty string.")
+        if len(v) > 128:
+            raise ValueError("upload_job_id too long.")
+        return v.strip()
 
 
 class BatchPdfFailure(BaseModel):
@@ -92,3 +110,11 @@ class ProcessBatchStatusResponse(BaseModel):
         ge=0,
         description="Count of entries in failed_paths (redundant but convenient for UI).",
     )
+
+
+class UploadFolderAcceptedResponse(BaseModel):
+    """Response from the browser folder upload endpoint."""
+
+    upload_job_id: str
+    pdf_paths_saved: int
+    staging_dir: str
