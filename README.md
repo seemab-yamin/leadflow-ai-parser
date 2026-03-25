@@ -1,84 +1,47 @@
-# FastAPI Docker Boilerplate
+# LeadfFlow AI Parser
 
-Minimal, production-ready FastAPI boilerplate with Docker and docker-compose.
-Designed to be reused as a base for APIs and ML services.
-
-## Features
-- FastAPI with health check
-- Dockerized development environment
-- Hot reload for local development
-- Basic test setup with pytest
+## Quickstart (about 1 minute)
+1. Create and activate a virtual environment:
+   - `python -m venv .venv`
+   - **macOS / Linux:** `source .venv/bin/activate`
+   - **Windows (cmd):** `.venv\Scripts\activate.bat`
+   - **Windows (PowerShell):** `.venv\Scripts\Activate.ps1`
+2. Install dependencies:
+   - `pip install -r requirements.txt`
+3. Configure environment (optional): create a `.env` in the repo root if you use env-based secrets (e.g. `OPENAI_API_KEY`); see `app/core/config.py` for supported variables.
+4. Start the dev server:
+   - `uvicorn app.main:app --reload --host 0.0.0.0 --port 8000`
+5. Open in your browser:
+   - `http://localhost:8000/`
+   - Health check (liveness): `http://localhost:8000/health` or `http://localhost:8000/health/`
 
 ## Requirements
-- Docker
-- Docker Compose
 
-## Getting Started
+- **Python 3.12+** (see `requirements.txt`).
+- **Java (JRE/JDK)** on the server if you run DC PDF text extraction: Apache Tika is used via the `tika` package and shells out to Java. Ensure `java` is on `PATH`.
+- **Batch PDFs on disk:** `POST /api/process-batch` accepts `root_folder` plus `pdf_paths` for PDFs that **exist on the API server** (relative paths are resolved from the server process working directory, or use absolute paths).
 
-1. Clone the repository
-```
-git clone https://github.com/seemab-yamin/fastapi-boilerplate
-cd fastapi-docker-boilerplate
-```
+## Folder Selection Flow
+- **Browser:** the UI uses a folder picker (`webkitdirectory`). It builds a PDF path list and category summary **in the browser** (same rules as the server for supported folders such as `DC`).
+- **Process:** `POST /api/process-batch` sends those `pdf_paths` and `root_folder`. The server must be able to open each path (e.g. run the app with its cwd set to a folder tree that mirrors the picked layout, or use absolute server paths).
+- **Staged uploads:** helpers under `outputs/uploads/` (`app/services/upload_jobs.py`) exist for a future multipart upload route if you add one to `main.py`.
 
-2. Create environment file
-```
-cp .env.example .env
-```
+## Prompt Versions
+- Versioned prompts are stored flat under `prompts/`.
+- Runtime picks prompt version from `config.json` key `dc_prompt_version` and loads `prompts/<version>.txt`.
 
-Edit .env if needed.
+## Running in Development
 
+Same `uvicorn` command as Quickstart. Use a project venv so `tika` and Java match the environment where you run batch jobs.
 
-API endpoints:
+## Logging (`logs-dir/`)
 
-API root: http://localhost:8000
+## Troubleshooting
 
-Swagger docs: http://localhost:8000/docs
+## Architecture Overview
 
-Health check: http://localhost:8000/health/
-
-## Common Commands
-
-Run tests:
-```
-docker-compose run api pytest
-```
-
-Build and start the service:
-
-```docker-compose up --build```
-
-Stop the service
-
-```docker-compose down```
+- **Supported batch folder categories** (e.g. which subfolders like `DC` are processed) live in one place: `app/core/supported_pdf_categories.py`.
 
 
-Rebuild image only:
-```
-docker-compose build
-```
+## Roadmap
 
-## Project Structure
-```
-app/
-├── main.py        # App entry point
-├── api/           # Route definitions
-│   └── health.py
-├── core/          # Config and settings
-│   └── config.py
-tests/             # Pytest tests
-Dockerfile
-docker-compose.yml
-requirements.txt
-.env.example
-```
-
-## Extending the Project
-
-- Add new routes under app/api
-
-- Add shared config in app/core/config.py
-
-- Add dependencies to requirements.txt
-
-- Add tests in tests/
