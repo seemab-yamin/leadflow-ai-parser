@@ -3,3 +3,9 @@ uvicorn[standard]
 pydantic-settings
 pytest
 httpx
+jinja2
+openpyxl
+pandas
+tika
+python-multipart
+openai
