@@ -42,6 +42,10 @@
 
 Same `uvicorn` command as Quickstart. Use a project venv so `tika` and Java match the environment where you run batch jobs.
 
+Optional: verify the AI service is reachable:
+- `python scripts/test_ai_service.py`
+- `python scripts/test_ai_service.py --model gpt-5.1-2025-11-13`
+
 ## Logging (`logs-dir/`)
 
 ## Troubleshooting
