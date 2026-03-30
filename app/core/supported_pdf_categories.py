@@ -19,12 +19,14 @@ from __future__ import annotations
 PARSER_IMPLEMENTATION_KEYS: frozenset[str] = frozenset(
     {
         "dc",
+        "va_alexandria",
     }
 )
 
 # Human-readable labels for parser keys (errors, logs, docs).
 DISPLAY_NAME_BY_PARSER_KEY: dict[str, str] = {
     "dc": "DC",
+    "va_alexandria": "VA Alexandria",
 }
 
 if set(DISPLAY_NAME_BY_PARSER_KEY.keys()) != set(PARSER_IMPLEMENTATION_KEYS):
@@ -51,6 +53,8 @@ def resolve_parser_key_for_user_category_folder(
     key = category_folder_name.strip().casefold()
     if key == "dc":
         return "dc"
+    if key == "va alexandria":
+        return "va_alexandria"
     return None
 
 

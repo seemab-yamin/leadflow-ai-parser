@@ -205,3 +205,38 @@ def test_parse_dc_parser_expands_parties_and_heirs(tmp_path):
     assert r["PR Phone Number"] == "2025559898"
     assert r["Heir 1 First Name"] == "Kid"
     assert r["Relationship 1"] == "Child"
+
+
+def test_extract_text_with_docling_backend_mocked(tmp_path, monkeypatch):
+    from app.services.pdf_text import extract_text_from_pdf
+
+    import sys
+    import types
+
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+
+    class _FakeDocument:
+        def export_to_markdown(self):
+            return "  hello docling  \n"
+
+    class _FakeResult:
+        document = _FakeDocument()
+
+    class _FakeDocumentConverter:
+        def convert(self, pdf_path: str):
+            # Mirror the expected shape used by the backend.
+            assert pdf_path == str(pdf.resolve())
+            return _FakeResult()
+
+    # Inject a fake `docling.document_converter` module so the backend can be tested
+    # without the real dependency installed.
+    fake_pkg = types.ModuleType("docling")
+    fake_dc = types.ModuleType("docling.document_converter")
+    fake_dc.DocumentConverter = _FakeDocumentConverter
+
+    monkeypatch.setitem(sys.modules, "docling", fake_pkg)
+    monkeypatch.setitem(sys.modules, "docling.document_converter", fake_dc)
+
+    out = extract_text_from_pdf(str(pdf), backend="docling")
+    assert out == "hello docling"

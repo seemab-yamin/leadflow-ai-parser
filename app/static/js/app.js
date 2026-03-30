@@ -46,7 +46,7 @@ document.addEventListener("DOMContentLoaded", () => {
   /**
    * UX-only hint for badges; server truth is `resolve_parser_key_for_user_category_folder`.
    */
-  const PARSER_AVAILABLE_CATEGORY_FOLDERS = new Set(["dc"]);
+  const PARSER_AVAILABLE_CATEGORY_FOLDERS = new Set(["dc", "va alexandria"]);
 
   function stripPickerRootPrefix(parts, rootFolderName) {
     if (!parts.length || !rootFolderName || !String(rootFolderName).trim()) {
@@ -1166,17 +1166,17 @@ document.addEventListener("DOMContentLoaded", () => {
     const sel = readBucketCheckboxSelection();
     const selectedPaths = lastBatch
       ? filterPdfPathsByBucketSelection(
-          lastBatch.pdfPaths || [],
-          lastBatch.folder,
-          sel
-        )
+        lastBatch.pdfPaths || [],
+        lastBatch.folder,
+        sel
+      )
       : [];
     const supported = lastBatch
       ? countParserAvailableInSelection(
-          lastBatch.pdfPaths || [],
-          lastBatch.folder,
-          sel
-        )
+        lastBatch.pdfPaths || [],
+        lastBatch.folder,
+        sel
+      )
       : 0;
     if (
       !lastBatch?.folder ||

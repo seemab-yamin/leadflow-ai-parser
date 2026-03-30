@@ -1,4 +1,5 @@
 {
   "llm_model": "gpt-5.1-2025-11-13",
-  "dc_prompt_version": "DC_Prob_Prompt_v7"
+  "dc_prompt_version": "DC_Prob_Prompt_v7",
+  "va_alexandria_prompt_version": "VA_Prob_Prompt_v1"
 }

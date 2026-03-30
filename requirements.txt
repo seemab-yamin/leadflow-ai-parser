@@ -10,3 +10,4 @@ tika
 python-multipart
 openai
 auto-py-to-exe
+docling

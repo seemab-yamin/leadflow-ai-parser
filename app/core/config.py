@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     _llm_model: str | None = None
     _dc_prompt_version: str | None = None
+    _va_alexandria_prompt_version: str | None = None
     # Minimum characters in preprocessed Tika text before calling the LLM (DC parser).
     _dc_min_preprocessed_chars: int = 80
 
@@ -42,6 +43,12 @@ class Settings(BaseSettings):
     def dc_min_preprocessed_chars(self) -> int:
         return self._dc_min_preprocessed_chars
 
+    @property
+    def va_alexandria_prompt_version(self) -> str:
+        if not self._va_alexandria_prompt_version:
+            raise RuntimeError("Missing 'va_alexandria_prompt_version' in config.json")
+        return self._va_alexandria_prompt_version
+
     def model_post_init(self, __context) -> None:  # type: ignore[override]
         cfg_path = _REPO_ROOT / "config.json"
         if not cfg_path.is_file():
@@ -58,6 +65,10 @@ class Settings(BaseSettings):
         ).strip()
         if version:
             object.__setattr__(self, "_dc_prompt_version", version)
+
+        va_version = str(data.get("va_alexandria_prompt_version") or "").strip()
+        if va_version:
+            object.__setattr__(self, "_va_alexandria_prompt_version", va_version)
         raw_min = data.get("dc_min_preprocessed_chars")
         if raw_min is not None:
             try:

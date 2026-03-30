@@ -18,9 +18,11 @@ from app.core.supported_pdf_categories import (
 )
 
 from .dc import parse_dc_parser
+from .va_alexandria import parse_va_alexandria
 
 PARSERS_BY_CATEGORY: dict[str, Callable[..., list[dict]]] = {
     "dc": parse_dc_parser,
+    "va_alexandria": parse_va_alexandria,
 }
 
 if set(PARSERS_BY_CATEGORY.keys()) != set(PARSER_IMPLEMENTATION_KEYS):
@@ -30,7 +32,9 @@ if set(PARSERS_BY_CATEGORY.keys()) != set(PARSER_IMPLEMENTATION_KEYS):
     )
 
 
-def get_parser_for_category(category_folder_name: str) -> Callable[..., list[dict]] | None:
+def get_parser_for_category(
+    category_folder_name: str,
+) -> Callable[..., list[dict]] | None:
     """Resolve the user’s category folder name to a parser callable, if implemented."""
     impl_key = resolve_parser_key_for_user_category_folder(category_folder_name)
     if impl_key is None:

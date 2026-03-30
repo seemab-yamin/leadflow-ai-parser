@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from app.services.pdf_text.backends.docling import extract_text_with_docling
 from app.services.pdf_text.backends.tika import extract_text_with_tika
 
 _BACKENDS: dict[str, Callable[[str], str]] = {
     "tika": extract_text_with_tika,
+    "docling": extract_text_with_docling,
 }
 
 DEFAULT_BACKEND = "tika"
