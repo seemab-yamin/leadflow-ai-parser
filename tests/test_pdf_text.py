@@ -208,8 +208,7 @@ def test_parse_dc_parser_expands_parties_and_heirs(tmp_path):
 
 
 def test_extract_text_with_docling_backend_mocked(tmp_path, monkeypatch):
-    from app.services.pdf_text import extract_text_from_pdf
-
+    import importlib
     import sys
     import types
 
@@ -229,8 +228,6 @@ def test_extract_text_with_docling_backend_mocked(tmp_path, monkeypatch):
             assert pdf_path == str(pdf.resolve())
             return _FakeResult()
 
-    # Inject a fake `docling.document_converter` module so the backend can be tested
-    # without the real dependency installed.
     fake_pkg = types.ModuleType("docling")
     fake_dc = types.ModuleType("docling.document_converter")
     fake_dc.DocumentConverter = _FakeDocumentConverter
@@ -238,5 +235,13 @@ def test_extract_text_with_docling_backend_mocked(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "docling", fake_pkg)
     monkeypatch.setitem(sys.modules, "docling.document_converter", fake_dc)
 
-    out = extract_text_from_pdf(str(pdf), backend="docling")
+    # `docling.py` imports DocumentConverter at module load; patch first, then reload
+    # so tests that already imported the real converter still see the fake.
+    import app.services.pdf_text.backends.docling as docling_backend
+    import app.services.pdf_text.extraction as extraction_mod
+
+    importlib.reload(docling_backend)
+    importlib.reload(extraction_mod)
+
+    out = extraction_mod.extract_text_from_pdf(str(pdf), backend="docling")
     assert out == "hello docling"
