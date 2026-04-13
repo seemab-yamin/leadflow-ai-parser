@@ -66,3 +66,47 @@ hb-raw-data-pipeline/
 ## Notes
 
 This repository currently contains only documentation. The implementation can be added incrementally following the structure above.
+
+## Dockerization Commands (AWS ECR)
+
+### 0) Configure AWS CLI credentials (named profile)
+
+```bash
+aws configure --profile hb-raw-data-pipeline
+aws configure set region us-east-1 --profile hb-raw-data-pipeline
+export AWS_PROFILE=hb-raw-data-pipeline
+```
+
+### 1) Authenticate Docker to Amazon ECR
+
+Retrieve an authentication token and authenticate your Docker client to your registry:
+
+```bash
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 317380566856.dkr.ecr.us-east-1.amazonaws.com
+```
+
+> Note: If you receive an error using the AWS CLI, make sure that you have the latest version of the AWS CLI and Docker installed.
+
+### 2) Build the Docker image
+
+```bash
+docker build -t hb-raw-data-pipeline .
+```
+
+If your image is already built, you can skip this step.
+
+### 3) Tag the image for ECR
+
+```bash
+docker tag hb-raw-data-pipeline:latest 317380566856.dkr.ecr.us-east-1.amazonaws.com/hb-raw-data-pipeline:latest
+```
+
+### 4) Push image to ECR
+
+```bash
+docker push 317380566856.dkr.ecr.us-east-1.amazonaws.com/hb-raw-data-pipeline:latest
+```
+
+## Production Schedule
+
+- The production pipeline runs on a **weekly schedule**.
