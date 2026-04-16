@@ -94,3 +94,29 @@ docker push 317380566856.dkr.ecr.us-east-1.amazonaws.com/hb-raw-data-pipeline:la
 ## Production Schedule
 
 - The production pipeline runs on a **weekly schedule**.
+
+## Secrets Manager Setup (Production)
+
+For production, store the Google service account JSON in AWS Secrets Manager instead of keeping the file in the container.
+
+### 1) Create the secret in the AWS Console
+
+- Open the **AWS Console** and go to **Secrets Manager**.
+- Choose **Store a new secret**.
+- Select **Other type of secret**.
+- Paste the full Google service account JSON into the secret value.
+- Use the secret name `hb-raw-data-pipeline/google-service-account`.
+- Save the secret in the same region as the Lambda function.
+
+### 2) Configure Lambda environment variables in the AWS Console
+
+- Open the **Lambda** function in the AWS Console.
+- Go to **Configuration** → **Environment variables**.
+- Add `GOOGLE_SERVICE_ACCOUNT_SECRET_ID=hb-raw-data-pipeline/google-service-account`.
+- Keep `GOOGLE_DRIVE_ROOT_FOLDER_ID`, `GOOGLE_SHEETS_SPREADSHEET_ID`, and other non-secret values as regular environment variables.
+
+### 3) Grant Lambda permission to read the secret in IAM
+
+- Open the Lambda execution role in **IAM**.
+- Add permission for `secretsmanager:GetSecretValue` on the secret ARN.
+- If the secret uses a customer-managed KMS key, also allow the role to decrypt that key.

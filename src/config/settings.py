@@ -16,6 +16,7 @@ class AppConfig:
     project_name: str
     raw_files_dir: Path
     google_credentials_path: Path | None
+    google_service_account_secret_id: str | None
     google_drive_root_folder_id: str | None
     google_sheets_spreadsheet_id: str | None
     google_sheets_worksheet_name: str
@@ -49,6 +50,9 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
     )
     raw_files_dir = Path(_read_env(source, "RAW_FILES_DIR", "raw") or "raw")
     google_credentials_path = _read_path(source, "GOOGLE_APPLICATION_CREDENTIALS")
+    google_service_account_secret_id = _read_env(
+        source, "GOOGLE_SERVICE_ACCOUNT_SECRET_ID"
+    )
     google_drive_root_folder_id = _read_env(source, "GOOGLE_DRIVE_ROOT_FOLDER_ID")
     google_sheets_spreadsheet_id = _read_env(source, "GOOGLE_SHEETS_SPREADSHEET_ID")
     google_sheets_worksheet_name = (
@@ -56,9 +60,21 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
     )
     log_level = _read_env(source, "LOG_LEVEL", "INFO") or "INFO"
 
+    if google_credentials_path is None and google_service_account_secret_id is not None:
+        from connectors.secrets_manager import materialize_secret_to_tmp
+
+        google_credentials_path = materialize_secret_to_tmp(
+            google_service_account_secret_id
+        )
+
     if google_credentials_path is not None and not google_credentials_path.exists():
         raise ConfigError(
             f"Google credentials file not found: {google_credentials_path}"
+        )
+
+    if google_credentials_path is None:
+        raise ConfigError(
+            "Google credentials must be provided via GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT_SECRET_ID"
         )
 
     return AppConfig(
@@ -66,6 +82,7 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
         project_name=project_name,
         raw_files_dir=raw_files_dir,
         google_credentials_path=google_credentials_path,
+        google_service_account_secret_id=google_service_account_secret_id,
         google_drive_root_folder_id=google_drive_root_folder_id,
         google_sheets_spreadsheet_id=google_sheets_spreadsheet_id,
         google_sheets_worksheet_name=google_sheets_worksheet_name,
