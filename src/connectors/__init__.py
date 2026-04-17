@@ -1,4 +1,10 @@
-from .google_drive import DriveItem, list_drive_tree
+from .google_drive import list_directories, list_files
 from .secrets_manager import materialize_secret_to_tmp
+from .sqs import SQSPublisher
 
-__all__ = ["DriveItem", "list_drive_tree", "materialize_secret_to_tmp"]
+__all__ = [
+    "list_directories",
+    "list_files",
+    "materialize_secret_to_tmp",
+    "SQSPublisher",
+]

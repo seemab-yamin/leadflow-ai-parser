@@ -1,87 +1,122 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Iterator
+import logging
+import random
+import time
+from typing import Any
 
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
+LOGGER = logging.getLogger(__name__)
 
-FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 
 
-@dataclass(frozen=True)
-class DriveItem:
-    id: str
-    name: str
-    mime_type: str
-    parent_id: str
-    path: str
-
-    @property
-    def is_folder(self) -> bool:
-        return self.mime_type == FOLDER_MIME_TYPE
-
-
-def _build_drive_service(credentials_path: Path):
-    credentials = service_account.Credentials.from_service_account_file(
-        str(credentials_path),
-        scopes=[DRIVE_READONLY_SCOPE],
-    )
-    return build("drive", "v3", credentials=credentials, cache_discovery=False)
-
-
-def _list_children(service, folder_id: str) -> Iterator[dict]:
-    page_token = None
-    query = f"'{folder_id}' in parents and trashed = false"
+def _list_with_retry(service, query: str, page_token: str | None, max_retries: int):
+    retries_left = max_retries
 
     while True:
-        response = (
-            service.files()
-            .list(
-                q=query,
-                fields="nextPageToken, files(id, name, mimeType)",
-                pageToken=page_token,
-                pageSize=1000,
-                supportsAllDrives=True,
-                includeItemsFromAllDrives=True,
+        try:
+            return (
+                service.files()
+                .list(
+                    q=query,
+                    fields="nextPageToken, files(id, name, mimeType, size, modifiedTime, parents)",
+                    pageSize=500,
+                    pageToken=page_token,
+                )
+                .execute()
             )
-            .execute()
+        except HttpError as e:
+            if e.resp.status in [403, 429] and retries_left > 0:
+                wait_time = (
+                    min(
+                        (2 ** (max_retries - retries_left)) + random.randint(0, 1000),
+                        32000,
+                    )
+                    / 1000
+                )
+                time.sleep(wait_time)
+                retries_left -= 1
+                continue
+            raise
+
+
+def list_directories(
+    service, folder_id: str, max_retries: int = 5
+) -> list[dict[str, Any]]:
+    """List immediate child directories under a folder.
+
+    These represent top-level document types under the configured root.
+    """
+    directories: list[dict[str, Any]] = []
+    page_token = None
+    query = (
+        f"'{folder_id}' in parents and trashed=false and mimeType='{FOLDER_MIME_TYPE}'"
+    )
+
+    while True:
+        results = _list_with_retry(service, query, page_token, max_retries)
+        page_directories = results.get("files", [])
+        directories.extend(page_directories)
+
+        page_token = results.get("nextPageToken")
+        LOGGER.info(
+            "Fetched %d directories from folder=%s (nextPageToken=%s)",
+            len(page_directories),
+            folder_id,
+            page_token,
         )
 
-        for item in response.get("files", []):
-            yield item
-
-        page_token = response.get("nextPageToken")
         if not page_token:
             break
 
+    return directories
 
-def list_drive_tree(credentials_path: Path, root_folder_id: str = "root") -> list[DriveItem]:
-    service = _build_drive_service(credentials_path)
 
-    items: list[DriveItem] = []
-    stack: list[tuple[str, str]] = [(root_folder_id, "")]
+def list_files(service, folder_id: str, max_retries: int = 5) -> list[dict[str, Any]]:
+    """Fetch all files recursively under a folder using iterative traversal.
+
+    Uses an explicit stack (DFS) to avoid recursion depth limits.
+    """
+    all_files: list[dict[str, Any]] = []
+    stack: list[str] = [folder_id]
+    visited_folders: set[str] = set()
 
     while stack:
-        current_folder_id, current_path = stack.pop()
+        current_folder_id = stack.pop()
 
-        for child in _list_children(service, current_folder_id):
-            child_name = child["name"]
-            child_path = f"{current_path}/{child_name}" if current_path else child_name
+        # Circular reference protection / duplicate traversal protection
+        if current_folder_id in visited_folders:
+            continue
+        visited_folders.add(current_folder_id)
 
-            drive_item = DriveItem(
-                id=child["id"],
-                name=child_name,
-                mime_type=child["mimeType"],
-                parent_id=current_folder_id,
-                path=child_path,
+        page_token = None
+        while True:
+            query = f"'{current_folder_id}' in parents and trashed=false"
+            results = _list_with_retry(service, query, page_token, max_retries)
+
+            files = results.get("files", [])
+
+            for item in files:
+                if item.get("mimeType") == FOLDER_MIME_TYPE:
+                    child_folder_id = item.get("id")
+                    if child_folder_id and (child_folder_id not in visited_folders):
+                        stack.append(child_folder_id)
+                else:
+                    all_files.append(item)
+
+            page_token = results.get("nextPageToken")
+
+            LOGGER.info(
+                "Fetched %d items from Google Drive (folder: %s, page token: %s)",
+                len(files),
+                current_folder_id,
+                page_token,
             )
-            items.append(drive_item)
 
-            if drive_item.is_folder:
-                stack.append((drive_item.id, child_path))
+            if not page_token:
+                break
 
-    return items
+    return all_files

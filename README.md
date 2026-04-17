@@ -2,6 +2,45 @@
 
 A data pipeline for processing raw PDF files from Google Drive, identifying the document type by folder name, extracting the relevant data, and saving the parsed result to Google Sheets.
 
+## Pipeline Diagram
+
+```text
+Google Drive → Publisher (Lambda) → SQS → Consumer (Lambda) → Processed → Move File
+			  ↑                              ↓
+		  Killswitch                    LLM + Pre/Post Processing
+```
+
+### Flow Summary
+
+- Google Drive stores the source files.
+- The Publisher Lambda discovers eligible document type folders and publishes file metadata to SQS.
+- The Consumer Lambda receives SQS messages, fetches file content, and processes the document.
+- Processed files are moved after successful handling.
+- A killswitch can stop the pipeline when needed.
+- LLM + pre/post-processing happens inside the consumer flow.
+
+## Publisher Deployment Notes
+
+The publisher implementation is complete and ready for Lambda deployment, with these important checks:
+
+- `ENABLED_FOLDERS` must contain the **immediate child folder names** under the configured `GOOGLE_DRIVE_FOLDER_ID` root.
+- `ENABLED_FOLDERS` is read as JSON, for example `[
+	"DC"
+]`.
+- Folder enablement is case-insensitive and trimmed, so `DC`, `dc`, and ` DC ` are treated the same.
+- Only enabled document type folders are crawled for files.
+- SQS batch publishing is limited to a maximum of 10 messages per batch.
+- The consumer can fetch file content using the Drive `id` from each message payload.
+- The message payload includes `id`, `name`, `mimeType`, `parents`, `document_type`, and `timestamp`.
+
+### Pre-Deploy Checks
+
+- Confirm `GOOGLE_DRIVE_FOLDER_ID` points to the actual root folder that directly contains document type folders.
+- Confirm the Lambda execution role can read Google credentials and send to SQS.
+- Confirm `SQS_QUEUE_URL` is configured.
+- Confirm `GOOGLE_APPLICATION_CREDENTIALS` or `GOOGLE_SERVICE_ACCOUNT_SECRET_ID` is available.
+- Confirm the Google Drive folder names match the values in `ENABLED_FOLDERS`.
+
 ## Overview
 
 This project is designed to be a small but robust pipeline that can grow over time. The architecture is intentionally simple so new document types can be added without rewriting the whole project.
@@ -74,7 +113,7 @@ aws ecr get-login-password --region us-east-1 | docker login --username AWS --pa
 ### 2) Build the Docker image
 
 ```bash
-docker build -t hb-raw-data-pipeline .
+docker build -f Dockerfile.publisher -t hb-raw-data-pipeline:publisher .
 ```
 
 If your image is already built, you can skip this step.
@@ -82,13 +121,13 @@ If your image is already built, you can skip this step.
 ### 3) Tag the image for ECR
 
 ```bash
-docker tag hb-raw-data-pipeline:latest 317380566856.dkr.ecr.us-east-1.amazonaws.com/hb-raw-data-pipeline:latest
+docker tag hb-raw-data-pipeline:publisher 317380566856.dkr.ecr.us-east-1.amazonaws.com/hb-raw-data-pipeline:publisher
 ```
 
 ### 4) Push image to ECR
 
 ```bash
-docker push 317380566856.dkr.ecr.us-east-1.amazonaws.com/hb-raw-data-pipeline:latest
+docker push 317380566856.dkr.ecr.us-east-1.amazonaws.com/hb-raw-data-pipeline:publisher
 ```
 
 ## Production Schedule
@@ -113,7 +152,7 @@ For production, store the Google service account JSON in AWS Secrets Manager ins
 - Open the **Lambda** function in the AWS Console.
 - Go to **Configuration** → **Environment variables**.
 - Add `GOOGLE_SERVICE_ACCOUNT_SECRET_ID=hb-raw-data-pipeline/google-service-account`.
-- Keep `GOOGLE_DRIVE_ROOT_FOLDER_ID`, `GOOGLE_SHEETS_SPREADSHEET_ID`, and other non-secret values as regular environment variables.
+- Keep `GOOGLE_DRIVE_FOLDER_ID`, `GOOGLE_SHEETS_SPREADSHEET_ID`, and other non-secret values as regular environment variables.
 
 ### 3) Grant Lambda permission to read the secret in IAM
 
