@@ -9,10 +9,37 @@ from googleapiclient.discovery import build
 
 from config import AppConfig, load_config
 from connectors import SQSPublisher, list_directories, list_files
+from connectors.parameters_manager import load_parameter_json
 
 LOGGER = logging.getLogger(__name__)
 
 DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+
+GOOGLE_CREDENTIALS: service_account.Credentials | None = None
+GOOGLE_CREDENTIALS_DICT: str | None = None
+GOOGLE_DRIVE_SERVICE: Any | None = None
+GOOGLE_DRIVE_SERVICE_SOURCE: str | None = None
+
+
+def get_google_credentials(
+    config: AppConfig,
+) -> service_account.Credentials:
+    """Build and cache Google service account credentials once per runtime."""
+    global GOOGLE_CREDENTIALS
+    global GOOGLE_CREDENTIALS_DICT
+
+    if GOOGLE_CREDENTIALS is not None and GOOGLE_CREDENTIALS_DICT is not None:
+        return GOOGLE_CREDENTIALS
+
+    google_credentials_dict = load_parameter_json(
+        config.google_service_account_parameter_id
+    )
+
+    GOOGLE_CREDENTIALS = service_account.Credentials.from_service_account_info(
+        google_credentials_dict,
+        scopes=[DRIVE_READONLY_SCOPE],
+    )
+    return GOOGLE_CREDENTIALS
 
 
 def bootstrap_logging(log_level) -> None:
@@ -47,11 +74,6 @@ class PublisherComponent:
         """Check KILL SWITCH env var - when true, skip execution (emergency stop)"""
         return self.config.kill_switch
 
-    def check_google_credentials(self) -> bool:
-        if self.config.google_credentials_path is None:
-            raise ValueError("GOOGLE_APPLICATION_CREDENTIALS is required")
-        return True
-
     def fetch_all_files_from_drive(self) -> dict[str, list[dict[str, Any]]]:
         """Fetch all files from configured Google Drive root folder
 
@@ -63,10 +85,8 @@ class PublisherComponent:
         """
 
         google_drive_folder_id = self.config.google_drive_folder_id or "root"
-        credentials = service_account.Credentials.from_service_account_file(
-            str(self.config.google_credentials_path),
-            scopes=[DRIVE_READONLY_SCOPE],
-        )
+        credentials = get_google_credentials(self.config)
+
         service = build("drive", "v3", credentials=credentials, cache_discovery=False)
 
         directories = list_directories(
@@ -164,15 +184,6 @@ class PublisherComponent:
             return {
                 "status": "skipped",
                 "reason": "kill switch_enabled",
-                "messages_published": 0,
-                "messages_failed": 0,
-            }
-
-        if not self.check_google_credentials():
-            LOGGER.error("Google credentials validation failed")
-            return {
-                "status": "error",
-                "reason": "google_credentials_invalid",
                 "messages_published": 0,
                 "messages_failed": 0,
             }

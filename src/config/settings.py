@@ -4,7 +4,9 @@ import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
+
+from connectors.parameters_manager import load_parameter_json
 
 
 class ConfigError(ValueError):
@@ -17,8 +19,8 @@ class AppConfig:
     environment: str
     project_name: str
     raw_files_dir: Path
-    google_credentials_path: Path | None
-    google_service_account_secret_id: str | None
+    google_service_account_info: dict[str, Any]
+    google_service_account_parameter_id: str | None
     google_drive_folder_id: str | None
     google_sheets_spreadsheet_id: str | None
     google_sheets_worksheet_name: str
@@ -80,14 +82,11 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
     source = os.environ if env is None else env
 
     environment = _read_env(source, "APP_ENV", "development") or "development"
-    project_name = (
-        _read_env(source, "PROJECT_NAME", "hb-raw-data-pipeline")
-        or "hb-raw-data-pipeline"
-    )
+    project_name = _read_env(source, "PROJECT_NAME", "")
+
     raw_files_dir = Path(_read_env(source, "RAW_FILES_DIR", "raw") or "raw")
-    google_credentials_path = _read_path(source, "GOOGLE_APPLICATION_CREDENTIALS")
-    google_service_account_secret_id = _read_env(
-        source, "GOOGLE_SERVICE_ACCOUNT_SECRET_ID"
+    google_service_account_parameter_id = _read_env(
+        source, "GOOGLE_SERVICE_ACCOUNT_PARAMETER_ID"
     )
     google_drive_folder_id = _read_env(source, "GOOGLE_DRIVE_FOLDER_ID")
     google_sheets_spreadsheet_id = _read_env(source, "GOOGLE_SHEETS_SPREADSHEET_ID")
@@ -103,29 +102,23 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
     if not 1 <= sqs_batch_size <= 10:
         raise ConfigError("SQS_BATCH_SIZE must be between 1 and 10")
 
-    if google_credentials_path is None and google_service_account_secret_id is not None:
-        from connectors.secrets_manager import materialize_secret_to_tmp
-
-        google_credentials_path = materialize_secret_to_tmp(
-            google_service_account_secret_id
+    google_service_account_info: dict[str, Any] | None = None
+    if google_service_account_parameter_id is not None:
+        google_service_account_info = load_parameter_json(
+            google_service_account_parameter_id
         )
 
-    if google_credentials_path is not None and not google_credentials_path.exists():
+    if google_service_account_info is None:
         raise ConfigError(
-            f"Google credentials file not found: {google_credentials_path}"
-        )
-
-    if google_credentials_path is None:
-        raise ConfigError(
-            "Google credentials must be provided via GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_SERVICE_ACCOUNT_SECRET_ID"
+            "Google credentials must be provided via GOOGLE_SERVICE_ACCOUNT_PARAMETER_ID"
         )
 
     return AppConfig(
         environment=environment,
         project_name=project_name,
         raw_files_dir=raw_files_dir,
-        google_credentials_path=google_credentials_path,
-        google_service_account_secret_id=google_service_account_secret_id,
+        google_service_account_info=google_service_account_info,
+        google_service_account_parameter_id=google_service_account_parameter_id,
         google_drive_folder_id=google_drive_folder_id,
         google_sheets_spreadsheet_id=google_sheets_spreadsheet_id,
         google_sheets_worksheet_name=google_sheets_worksheet_name,

@@ -75,10 +75,18 @@ def list_directories(
     return directories
 
 
-def list_files(service, folder_id: str, max_retries: int = 5) -> list[dict[str, Any]]:
+def list_files(
+    service,
+    folder_id: str,
+    max_retries: int = 5,
+    file_format: str | None = None,
+) -> list[dict[str, Any]]:
     """Fetch all files recursively under a folder using iterative traversal.
 
     Uses an explicit stack (DFS) to avoid recursion depth limits.
+
+    When ``file_format`` is provided, only files matching that MIME type
+    are returned (folders are still queried for traversal).
     """
     all_files: list[dict[str, Any]] = []
     stack: list[str] = [folder_id]
@@ -95,6 +103,11 @@ def list_files(service, folder_id: str, max_retries: int = 5) -> list[dict[str, 
         page_token = None
         while True:
             query = f"'{current_folder_id}' in parents and trashed=false"
+            if file_format:
+                query += (
+                    f" and (mimeType='{FOLDER_MIME_TYPE}' "
+                    f"or mimeType='{file_format}')"
+                )
             results = _list_with_retry(service, query, page_token, max_retries)
 
             files = results.get("files", [])

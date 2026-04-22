@@ -33,13 +33,14 @@ The publisher implementation is complete and ready for Lambda deployment, with t
 - The consumer can fetch file content using the Drive `id` from each message payload.
 - The message payload includes `id`, `name`, `mimeType`, `parents`, `document_type`, and `timestamp`.
 
-### Pre-Deploy Checks
+### LAMBDA Env Vars
 
-- Confirm `GOOGLE_DRIVE_FOLDER_ID` points to the actual root folder that directly contains document type folders.
-- Confirm the Lambda execution role can read Google credentials and send to SQS.
-- Confirm `SQS_QUEUE_URL` is configured.
-- Confirm `GOOGLE_APPLICATION_CREDENTIALS` or `GOOGLE_SERVICE_ACCOUNT_SECRET_ID` is available.
-- Confirm the Google Drive folder names match the values in `ENABLED_FOLDERS`.
+- ENABLED_FOLDERS
+- GOOGLE_DRIVE_FOLDER_ID
+- GOOGLE_SERVICE_ACCOUNT_PARAMETER_ID
+- KILL_SWITCH
+- SQS_BATCH_SIZE
+- SQS_QUEUE_URL
 
 ## Overview
 
@@ -130,32 +131,70 @@ docker tag hb-raw-data-pipeline:publisher 317380566856.dkr.ecr.us-east-1.amazona
 docker push 317380566856.dkr.ecr.us-east-1.amazonaws.com/hb-raw-data-pipeline:publisher
 ```
 
+## Consumer Deployment Notes
+
+The consumer Lambda is scaffolded and ready for implementation. It is intended to:
+
+- receive SQS messages from the publisher
+- fetch the file content from Google Drive using the Drive file `id`
+- run LLM + pre/post-processing
+- move the processed file after successful handling
+
+### Consumer Docker Image Build and Push
+
+Build the consumer image using the consumer Dockerfile:
+
+```bash
+docker build -f Dockerfile.consumer -t hb-raw-data-pipeline:consumer .
+```
+
+Tag the consumer image for ECR:
+
+```bash
+docker tag hb-raw-data-pipeline:consumer 317380566856.dkr.ecr.us-east-1.amazonaws.com/hb-raw-data-pipeline:consumer
+```
+
+Push the consumer image to ECR:
+
+```bash
+docker push 317380566856.dkr.ecr.us-east-1.amazonaws.com/hb-raw-data-pipeline:consumer
+```
+
+### Consumer Lambda Setup
+
+- Create a second Lambda function for the consumer using the consumer container image.
+- Set the Lambda handler to `consumer.lambda_handler`.
+- Configure the event source mapping from the publisher SQS queue to the consumer Lambda.
+- Add the Google service account credentials via `GOOGLE_SERVICE_ACCOUNT_PARAMETER_ID`.
+- Set `SQS_QUEUE_URL` only if the consumer also needs to publish downstream messages later.
+- Keep `LOG_LEVEL`, `APP_ENV`, `PROJECT_NAME`, and `RAW_FILES_DIR` consistent with the publisher setup.
+
 ## Production Schedule
 
 - The production pipeline runs on a **weekly schedule**.
 
-## Secrets Manager Setup (Production)
+## Parameter Store Setup (Production)
 
-For production, store the Google service account JSON in AWS Secrets Manager instead of keeping the file in the container.
+For production, store the Google service account JSON in AWS Systems Manager Parameter Store instead of keeping the file in the container.
 
-### 1) Create the secret in the AWS Console
+### 1) Create the parameter in the AWS Console
 
-- Open the **AWS Console** and go to **Secrets Manager**.
-- Choose **Store a new secret**.
-- Select **Other type of secret**.
-- Paste the full Google service account JSON into the secret value.
-- Use the secret name `hb-raw-data-pipeline/google-service-account`.
-- Save the secret in the same region as the Lambda function.
+- Open the **AWS Console** and go to **Systems Manager** → **Parameter Store**.
+- Choose **Create parameter**.
+- Select **SecureString** as the parameter type.
+- Paste the full Google service account JSON into the parameter value.
+- Use the parameter name `hb-raw-data-pipeline_google-service-account`.
+- Save the parameter in the same region as the Lambda function.
 
 ### 2) Configure Lambda environment variables in the AWS Console
 
 - Open the **Lambda** function in the AWS Console.
 - Go to **Configuration** → **Environment variables**.
-- Add `GOOGLE_SERVICE_ACCOUNT_SECRET_ID=hb-raw-data-pipeline/google-service-account`.
+- Add `GOOGLE_SERVICE_ACCOUNT_PARAMETER_ID=hb-raw-data-pipeline_google-service-account`.
 - Keep `GOOGLE_DRIVE_FOLDER_ID`, `GOOGLE_SHEETS_SPREADSHEET_ID`, and other non-secret values as regular environment variables.
 
-### 3) Grant Lambda permission to read the secret in IAM
+### 3) Grant Lambda permission to read the parameter in IAM
 
 - Open the Lambda execution role in **IAM**.
-- Add permission for `secretsmanager:GetSecretValue` on the secret ARN.
-- If the secret uses a customer-managed KMS key, also allow the role to decrypt that key.
+- Add permission for `ssm:GetParameter` on the parameter ARN.
+- If the parameter uses a customer-managed KMS key, also allow the role to decrypt that key.
