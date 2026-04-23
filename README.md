@@ -162,6 +162,8 @@ docker push 317380566856.dkr.ecr.us-east-1.amazonaws.com/hb-raw-data-pipeline:co
 
 ### Consumer Lambda Setup
 
+Tika Server Download: https://archive.apache.org/dist/tika/2.9.2/tika-server-standard-2.9.2.jar
+
 - Create a second Lambda function for the consumer using the consumer container image.
 - Set the Lambda handler to `consumer.lambda_handler`.
 - Configure the event source mapping from the publisher SQS queue to the consumer Lambda.

@@ -1,2 +1,4 @@
 top-design-318115-c93e7d0750db.json
 .env
+*.jar
+*.jar.*

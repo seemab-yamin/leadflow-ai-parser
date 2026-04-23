@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from connectors.parameters_manager import load_parameter_json
+from connectors.parameters_manager import load_parameter_json, load_parameter_value
 
 
 class ConfigError(ValueError):
@@ -30,6 +30,9 @@ class AppConfig:
     sqs_queue_url: str | None
     sqs_batch_size: int
     prompts_dir: Path
+    openai_api_key_parameter_id: str | None
+    openai_api_key: str | None
+    llm_model: str | None
 
 
 def _read_env(
@@ -100,7 +103,8 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
     kill_switch = _read_bool(source, "KILL_SWITCH", False)
     sqs_queue_url = _read_env(source, "SQS_QUEUE_URL")
     sqs_batch_size = _read_int(source, "SQS_BATCH_SIZE", 10)
-
+    openai_api_key_parameter_id = _read_env(source, "OPENAI_API_KEY_PARAMETER_ID")
+    llm_model = _read_env(source, "LLM_MODEL")
     if not google_drive_folder_id:
         raise ConfigError("GOOGLE_DRIVE_FOLDER_ID must be configured")
 
@@ -109,6 +113,10 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
 
     if not 1 <= sqs_batch_size <= 10:
         raise ConfigError("SQS_BATCH_SIZE must be between 1 and 10")
+
+    openai_api_key: str | None = None
+    if openai_api_key_parameter_id:
+        openai_api_key = load_parameter_value(openai_api_key_parameter_id)
 
     google_service_account_info: dict[str, Any] | None = None
     if google_service_account_parameter_id is not None:
@@ -136,4 +144,7 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
         sqs_queue_url=sqs_queue_url,
         sqs_batch_size=sqs_batch_size,
         prompts_dir=prompts_dir,
+        openai_api_key_parameter_id=openai_api_key_parameter_id,
+        openai_api_key=openai_api_key,
+        llm_model=llm_model,
     )
