@@ -29,6 +29,7 @@ class AppConfig:
     kill_switch: bool
     sqs_queue_url: str | None
     sqs_batch_size: int
+    prompts_dir: Path
 
 
 def _read_env(
@@ -94,10 +95,17 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
         _read_env(source, "GOOGLE_SHEETS_WORKSHEET_NAME", "Sheet1") or "Sheet1"
     )
     log_level = _read_env(source, "LOG_LEVEL", "INFO") or "INFO"
+    prompts_dir = Path(_read_env(source, "PROMPTS_DIR", "prompts") or "prompts")
     enabled_folders = _read_json_list(source, "ENABLED_FOLDERS", [])
     kill_switch = _read_bool(source, "KILL_SWITCH", False)
     sqs_queue_url = _read_env(source, "SQS_QUEUE_URL")
     sqs_batch_size = _read_int(source, "SQS_BATCH_SIZE", 10)
+
+    if not google_drive_folder_id:
+        raise ConfigError("GOOGLE_DRIVE_FOLDER_ID must be configured")
+
+    if not google_service_account_parameter_id:
+        raise ConfigError("GOOGLE_SERVICE_ACCOUNT_PARAMETER_ID must be configured")
 
     if not 1 <= sqs_batch_size <= 10:
         raise ConfigError("SQS_BATCH_SIZE must be between 1 and 10")
@@ -127,4 +135,5 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
         kill_switch=kill_switch,
         sqs_queue_url=sqs_queue_url,
         sqs_batch_size=sqs_batch_size,
+        prompts_dir=prompts_dir,
     )

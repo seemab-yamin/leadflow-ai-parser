@@ -9,7 +9,6 @@ from googleapiclient.discovery import build
 
 from config import AppConfig, load_config
 from connectors import SQSPublisher, list_directories, list_files
-from connectors.parameters_manager import load_parameter_json
 
 LOGGER = logging.getLogger(__name__)
 
@@ -26,17 +25,12 @@ def get_google_credentials(
 ) -> service_account.Credentials:
     """Build and cache Google service account credentials once per runtime."""
     global GOOGLE_CREDENTIALS
-    global GOOGLE_CREDENTIALS_DICT
 
-    if GOOGLE_CREDENTIALS is not None and GOOGLE_CREDENTIALS_DICT is not None:
+    if GOOGLE_CREDENTIALS is not None:
         return GOOGLE_CREDENTIALS
 
-    google_credentials_dict = load_parameter_json(
-        config.google_service_account_parameter_id
-    )
-
     GOOGLE_CREDENTIALS = service_account.Credentials.from_service_account_info(
-        google_credentials_dict,
+        config.google_service_account_info,
         scopes=[DRIVE_READONLY_SCOPE],
     )
     return GOOGLE_CREDENTIALS

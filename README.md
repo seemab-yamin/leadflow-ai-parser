@@ -167,7 +167,7 @@ docker push 317380566856.dkr.ecr.us-east-1.amazonaws.com/hb-raw-data-pipeline:co
 - Configure the event source mapping from the publisher SQS queue to the consumer Lambda.
 - Add the Google service account credentials via `GOOGLE_SERVICE_ACCOUNT_PARAMETER_ID`.
 - Set `SQS_QUEUE_URL` only if the consumer also needs to publish downstream messages later.
-- Keep `LOG_LEVEL`, `APP_ENV`, `PROJECT_NAME`, and `RAW_FILES_DIR` consistent with the publisher setup.
+- Keep `LOG_LEVEL`, `APP_ENV`, and `PROJECT_NAME` consistent with the publisher setup.
 
 ## Production Schedule
 
