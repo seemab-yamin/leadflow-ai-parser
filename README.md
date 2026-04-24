@@ -30,6 +30,7 @@ The publisher implementation is complete and ready for Lambda deployment, with t
 - Folder enablement is case-insensitive and trimmed, so `DC`, `dc`, and ` DC ` are treated the same.
 - Only enabled document type folders are crawled for files.
 - SQS batch publishing is limited to a maximum of 10 messages per batch.
+- **Reliability**: The SQS queue should be configured with a **Dead-Letter Queue (DLQ)** to capture messages that fail processing after multiple retries (e.g., `maxReceiveCount: 3`).
 - The consumer can fetch file content using the Drive `id` from each message payload.
 - The message payload includes `id`, `name`, `mimeType`, `parents`, `document_type`, and `timestamp`.
 
@@ -39,7 +40,7 @@ The publisher implementation is complete and ready for Lambda deployment, with t
 - GOOGLE_DRIVE_FOLDER_ID
 - GOOGLE_SERVICE_ACCOUNT_PARAMETER_ID
 - KILL_SWITCH
-- SQS_BATCH_SIZE
+- SQS_PUBLISH_BATCH_SIZE
 - SQS_QUEUE_URL
 
 ## Overview
@@ -166,7 +167,10 @@ Tika Server Download: https://archive.apache.org/dist/tika/2.9.2/tika-server-sta
 
 - Create a second Lambda function for the consumer using the consumer container image.
 - Set the Lambda handler to `consumer.lambda_handler`.
-- Configure the event source mapping from the publisher SQS queue to the consumer Lambda.
+- **SQS Configuration**: 
+  - Configure the event source mapping from the publisher SQS queue to the consumer Lambda.
+  - Enable **Report batch item failures** in the SQS trigger settings to support partial batch failure reporting.
+  - Set the visibility timeout to at least 6x the Lambda timeout (recommended for LLM processing).
 - Add the Google service account credentials via `GOOGLE_SERVICE_ACCOUNT_PARAMETER_ID`.
 - Set `SQS_QUEUE_URL` only if the consumer also needs to publish downstream messages later.
 - Keep `LOG_LEVEL`, `APP_ENV`, and `PROJECT_NAME` consistent with the publisher setup.

@@ -5,43 +5,15 @@ from datetime import datetime, timezone
 from typing import Any
 
 from google.oauth2 import service_account
-from googleapiclient.discovery import build
 
 from config import AppConfig, load_config
 from connectors import SQSPublisher, list_directories, list_files
+from connectors.google_auth import get_credentials, get_google_drive_service
+from logging_setup import bootstrap_logging
 
 LOGGER = logging.getLogger(__name__)
 
 DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
-
-GOOGLE_CREDENTIALS: service_account.Credentials | None = None
-GOOGLE_CREDENTIALS_DICT: str | None = None
-GOOGLE_DRIVE_SERVICE: Any | None = None
-GOOGLE_DRIVE_SERVICE_SOURCE: str | None = None
-
-
-def get_google_credentials(
-    config: AppConfig,
-) -> service_account.Credentials:
-    """Build and cache Google service account credentials once per runtime."""
-    global GOOGLE_CREDENTIALS
-
-    if GOOGLE_CREDENTIALS is not None:
-        return GOOGLE_CREDENTIALS
-
-    GOOGLE_CREDENTIALS = service_account.Credentials.from_service_account_info(
-        config.google_service_account_info,
-        scopes=[DRIVE_READONLY_SCOPE],
-    )
-    return GOOGLE_CREDENTIALS
-
-
-def bootstrap_logging(log_level) -> None:
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s - %(message)s",
-        force=True,
-    )
 
 
 class PublisherComponent:
@@ -63,6 +35,24 @@ class PublisherComponent:
         self.messages_published = 0
         self.messages_failed = 0
         self._sqs_publisher: SQSPublisher | None = None
+        self._google_credentials: service_account.Credentials | None = None
+        self._drive_service: Any | None = None
+
+    @property
+    def google_credentials(self) -> service_account.Credentials:
+        if self._google_credentials is None:
+            self._google_credentials = get_credentials(
+                self.config, scopes=[DRIVE_READONLY_SCOPE]
+            )
+        return self._google_credentials
+
+    @property
+    def drive_service(self) -> Any:
+        if self._drive_service is None:
+            self._drive_service = get_google_drive_service(
+                credentials=self.google_credentials
+            )
+        return self._drive_service
 
     def check_kill_switch(self) -> bool:
         """Check KILL SWITCH env var - when true, skip execution (emergency stop)"""
@@ -78,13 +68,9 @@ class PublisherComponent:
         - parents: list[str]
         """
 
-        google_drive_folder_id = self.config.google_drive_folder_id or "root"
-        credentials = get_google_credentials(self.config)
-
-        service = build("drive", "v3", credentials=credentials, cache_discovery=False)
-
+        google_drive_folder_id = self.config.google_drive_folder_id
         directories = list_directories(
-            service=service,
+            service=self.drive_service,
             folder_id=google_drive_folder_id,
         )
 
@@ -129,7 +115,7 @@ class PublisherComponent:
                 continue
 
             document_type_files = list_files(
-                service=service,
+                service=self.drive_service,
                 folder_id=directory_id,
             )
 
@@ -233,12 +219,12 @@ class PublisherComponent:
         LOGGER.info(
             "Publishing %d messages in batches of %d",
             len(messages),
-            self.config.sqs_batch_size,
+            self.config.sqs_publish_batch_size,
         )
 
         batch_successful_count, failed_messages = self._sqs_publisher.publish_batch(
             messages=messages,
-            batch_size=self.config.sqs_batch_size,
+            batch_size=self.config.sqs_publish_batch_size,
         )
         self.messages_published += batch_successful_count
 

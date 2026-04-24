@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import logging
-import random
-import time
 from typing import Any
 
 from googleapiclient.errors import HttpError
+from tenacity import (
+    before_sleep_log,
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -13,34 +18,37 @@ DRIVE_READONLY_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 
 
-def _list_with_retry(service, query: str, page_token: str | None, max_retries: int):
-    retries_left = max_retries
+def _is_retryable_error(exception: Exception) -> bool:
+    """Check if a Google API error is retryable (403 Rate Limit, 429, 5xx)."""
+    if isinstance(exception, HttpError):
+        # 403 can be rate limit (userRateLimitExceeded) or other errors.
+        # 429 is always rate limit. 5xx is server error.
+        return exception.resp.status in [403, 429] or exception.resp.status >= 500
+    return False
 
-    while True:
-        try:
-            return (
-                service.files()
-                .list(
-                    q=query,
-                    fields="nextPageToken, files(id, name, mimeType, size, modifiedTime, parents)",
-                    pageSize=500,
-                    pageToken=page_token,
-                )
-                .execute()
+
+def _list_with_retry(service, query: str, page_token: str | None, max_retries: int):
+
+    @retry(
+        retry=retry_if_exception(_is_retryable_error),
+        wait=wait_exponential_jitter(initial=1, max=32),
+        stop=stop_after_attempt(max_retries),
+        before_sleep=before_sleep_log(LOGGER, logging.INFO),
+        reraise=True,
+    )
+    def _execute():
+        return (
+            service.files()
+            .list(
+                q=query,
+                fields="nextPageToken, files(id, name, mimeType, size, modifiedTime, parents)",
+                pageSize=500,
+                pageToken=page_token,
             )
-        except HttpError as e:
-            if e.resp.status in [403, 429] and retries_left > 0:
-                wait_time = (
-                    min(
-                        (2 ** (max_retries - retries_left)) + random.randint(0, 1000),
-                        32000,
-                    )
-                    / 1000
-                )
-                time.sleep(wait_time)
-                retries_left -= 1
-                continue
-            raise
+            .execute()
+        )
+
+    return _execute()
 
 
 def list_directories(
