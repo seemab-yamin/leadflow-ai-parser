@@ -26,13 +26,7 @@ COPY src/ ${LAMBDA_TASK_ROOT}/
 COPY prompts/ ${LAMBDA_TASK_ROOT}/prompts/
 
 # Verify docling loads models correctly at build time
-RUN python -c "\
-    import os; \
-    os.environ['HF_HOME'] = '/var/task/hf_cache'; \
-    from docling.document_converter import DocumentConverter; \
-    result = DocumentConverter().convert('prompts/test.pdf'); \
-    print(result.document.export_to_markdown()[:200]); \
-    print('Docling OK')"
+RUN python -c "import os; os.environ['HF_HOME'] = '/var/task/hf_cache'; from docling.document_converter import DocumentConverter; result = DocumentConverter().convert('prompts/test.pdf'); print(result.document.export_to_markdown()[:200]); print('Docling OK')"
 
 ARG APP_ENV=production
 ARG PROJECT_NAME=hb-raw-data-pipeline
