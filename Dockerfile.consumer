@@ -4,7 +4,7 @@ WORKDIR ${LAMBDA_TASK_ROOT}
 
 COPY consumer-requirements.txt ${LAMBDA_TASK_ROOT}/
 RUN pip install --no-cache-dir -r consumer-requirements.txt
-RUN pip install --no-cache-dir docling rapidocr --extra-index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir docling rapidocr-onnxruntime --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Install Java for Tika
 RUN dnf install -y java-17-amazon-corretto-headless mesa-libGL && dnf clean all
