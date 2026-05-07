@@ -6,7 +6,7 @@ COPY consumer-requirements.txt ${LAMBDA_TASK_ROOT}/
 RUN pip install --no-cache-dir -r consumer-requirements.txt
 RUN pip install --no-cache-dir docling rapidocr-onnxruntime --extra-index-url https://download.pytorch.org/whl/cpu
 
-# Install Java for Tika
+# Install Java for Tika and OpenGL for OpenCV
 RUN dnf install -y java-17-amazon-corretto-headless mesa-libGL && dnf clean all
 
 # Tika JAR
@@ -14,16 +14,25 @@ RUN mkdir -p /opt/tika
 COPY tika/tika-server-standard-2.9.2.jar /opt/tika/tika-server.jar
 COPY tika/tika-server-standard-2.9.2.jar.md5 /opt/tika/tika-server.jar.md5
 
-COPY .cache/docling_models /var/task/docling_models
+# Copy docling models from local build context
+COPY .cache/huggingface/hub/models--docling-project--docling-layout-heron/ \
+    /var/task/hf_cache/hub/models--docling-project--docling-layout-heron/
+COPY .cache/huggingface/hub/models--docling-project--docling-models/ \
+    /var/task/hf_cache/hub/models--docling-project--docling-models/
 
-RUN mkdir -p /var/task/docling_models
-ENV DOCLING_ARTIFACTS_PATH=/var/task/docling_models
-
+ENV HF_HOME=/var/task/hf_cache
 
 COPY src/ ${LAMBDA_TASK_ROOT}/
 COPY prompts/ ${LAMBDA_TASK_ROOT}/prompts/
 
-RUN python -c "from docling.document_converter import DocumentConverter; result = DocumentConverter().convert('prompts/test.pdf'); print(result)"
+# Verify docling loads models correctly at build time
+RUN python -c "\
+    import os; \
+    os.environ['HF_HOME'] = '/var/task/hf_cache'; \
+    from docling.document_converter import DocumentConverter; \
+    result = DocumentConverter().convert('prompts/test.pdf'); \
+    print(result.document.export_to_markdown()[:200]); \
+    print('Docling OK')"
 
 ARG APP_ENV=production
 ARG PROJECT_NAME=hb-raw-data-pipeline
@@ -42,6 +51,6 @@ ENV APP_ENV=${APP_ENV} \
     DC_PROMPT=${DC_PROMPT} \
     VA_ALEXANDRIA_PROMPT=${VA_ALEXANDRIA_PROMPT} \
     TIKA_SERVER_JAR=${TIKA_SERVER_JAR} \
-    DOCLING_ARTIFACTS_PATH=/var/task/docling_models
+    HF_HOME=/var/task/hf_cache
 
 CMD ["consumer.lambda_handler"]
