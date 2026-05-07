@@ -1,0 +1,43 @@
+FROM public.ecr.aws/lambda/python:3.12
+
+WORKDIR ${LAMBDA_TASK_ROOT}
+
+COPY consumer-requirements.txt ${LAMBDA_TASK_ROOT}/
+RUN pip install --no-cache-dir -r consumer-requirements.txt
+RUN pip install --no-cache-dir docling --extra-index-url https://download.pytorch.org/whl/cpu
+
+# Install Java for Tika
+RUN dnf install -y java-17-amazon-corretto-headless && dnf clean all
+
+# Tika JAR
+RUN mkdir -p /opt/tika
+COPY tika/tika-server-standard-2.9.2.jar /opt/tika/tika-server.jar
+COPY tika/tika-server-standard-2.9.2.jar.md5 /opt/tika/tika-server.jar.md5
+
+# Set environment variable for docling cache directory
+ENV DOCLING_ARTIFACTS_PATH=/var/task/docling_models
+
+RUN python -c "from docling.document_converter import DocumentConverter; DocumentConverter(); print('Docling models downloaded successfully')"
+
+COPY src/ ${LAMBDA_TASK_ROOT}/
+COPY prompts/ ${LAMBDA_TASK_ROOT}/prompts/
+
+ARG APP_ENV=production
+ARG PROJECT_NAME=hb-raw-data-pipeline
+ARG RAW_FILES_DIR=/tmp
+ARG LOG_LEVEL=INFO
+ARG PROMPTS_DIR=prompts
+ARG DC_PROMPT=DC_Prob_Prompt_v7.txt
+ARG VA_ALEXANDRIA_PROMPT=VA_ALEXANDRIA_Prob_Prompt_v1.txt
+ARG TIKA_SERVER_JAR=file:///opt/tika/tika-server.jar
+
+ENV APP_ENV=${APP_ENV} \
+    PROJECT_NAME=${PROJECT_NAME} \
+    RAW_FILES_DIR=${RAW_FILES_DIR} \
+    LOG_LEVEL=${LOG_LEVEL} \
+    PROMPTS_DIR=${PROMPTS_DIR} \
+    DC_PROMPT=${DC_PROMPT} \
+    VA_ALEXANDRIA_PROMPT=${VA_ALEXANDRIA_PROMPT} \
+    TIKA_SERVER_JAR=${TIKA_SERVER_JAR}
+
+CMD ["consumer.lambda_handler"]
