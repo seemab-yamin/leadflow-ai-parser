@@ -4,23 +4,26 @@ WORKDIR ${LAMBDA_TASK_ROOT}
 
 COPY consumer-requirements.txt ${LAMBDA_TASK_ROOT}/
 RUN pip install --no-cache-dir -r consumer-requirements.txt
-RUN pip install --no-cache-dir docling --extra-index-url https://download.pytorch.org/whl/cpu
+RUN pip install --no-cache-dir docling rapidocr --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Install Java for Tika
-RUN dnf install -y java-17-amazon-corretto-headless && dnf clean all
+RUN dnf install -y java-17-amazon-corretto-headless mesa-libGL && dnf clean all
 
 # Tika JAR
 RUN mkdir -p /opt/tika
 COPY tika/tika-server-standard-2.9.2.jar /opt/tika/tika-server.jar
 COPY tika/tika-server-standard-2.9.2.jar.md5 /opt/tika/tika-server.jar.md5
 
-# Set environment variable for docling cache directory
+COPY .cache/docling_models /var/task/docling_models
+
+RUN mkdir -p /var/task/docling_models
 ENV DOCLING_ARTIFACTS_PATH=/var/task/docling_models
 
-RUN python -c "from docling.document_converter import DocumentConverter; DocumentConverter(); print('Docling models downloaded successfully')"
 
 COPY src/ ${LAMBDA_TASK_ROOT}/
 COPY prompts/ ${LAMBDA_TASK_ROOT}/prompts/
+
+RUN python -c "from docling.document_converter import DocumentConverter; result = DocumentConverter().convert('prompts/test.pdf'); print(result)"
 
 ARG APP_ENV=production
 ARG PROJECT_NAME=hb-raw-data-pipeline
@@ -38,6 +41,7 @@ ENV APP_ENV=${APP_ENV} \
     PROMPTS_DIR=${PROMPTS_DIR} \
     DC_PROMPT=${DC_PROMPT} \
     VA_ALEXANDRIA_PROMPT=${VA_ALEXANDRIA_PROMPT} \
-    TIKA_SERVER_JAR=${TIKA_SERVER_JAR}
+    TIKA_SERVER_JAR=${TIKA_SERVER_JAR} \
+    DOCLING_ARTIFACTS_PATH=/var/task/docling_models
 
 CMD ["consumer.lambda_handler"]
